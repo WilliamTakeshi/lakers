@@ -53,7 +53,7 @@ pub fn r_process_message_1(
     state: &ResponderStart,
     crypto: &mut impl CryptoTrait,
     message_1: &BufferMessage1,
-) -> Result<(ProcessingM1, ConnId, Option<EADItem>), EDHOCError> {
+) -> Result<(ProcessingM1, ConnId, EdhocEadBuffer<MAX_EAD_ITEMS>), EDHOCError> {
     // Step 1: decode message_1
     // g_x will be saved to the state
     if let Ok((method, suites_i, g_x, c_i, ead_1)) = parse_message_1(message_1) {
@@ -285,10 +285,10 @@ pub fn i_prepare_message_1(
     state: &InitiatorStart,
     crypto: &mut impl CryptoTrait,
     c_i: ConnId,
-    ead_1: &Option<EADItem>, // FIXME: make it a list of EADItem
+    ead_1: &[EADItem],
 ) -> Result<(WaitM2, BufferMessage1), EDHOCError> {
     // Encode message_1 as a sequence of CBOR encoded data items as specified in Section 5.2.1
-    let message_1 = encode_message_1(state.method, &state.suites_i, &state.g_x, c_i, ead_1)?;
+    let message_1 = encode_message_1(state.method, &state.suites_i, &state.g_x, c_i, &ead_1)?;
 
     let mut message_1_buf: BytesMaxBuffer = [0x00; MAX_BUFFER_LEN];
     message_1_buf[..message_1.len].copy_from_slice(message_1.as_slice());
@@ -532,7 +532,7 @@ fn encode_message_1(
     suites: &EdhocBuffer<MAX_SUITES_LEN>,
     g_x: &BytesP256ElemLen,
     c_i: ConnId,
-    ead_1: &Option<EADItem>,
+    ead_1: &[EADItem],
 ) -> Result<BufferMessage1, EDHOCError> {
     let mut output = BufferMessage1::new();
     let mut raw_suites_len: usize = 0;
@@ -569,21 +569,39 @@ fn encode_message_1(
     output.content[2 + raw_suites_len] = P256_ELEM_LEN as u8; // length of the byte string
     output.content[3 + raw_suites_len..3 + raw_suites_len + P256_ELEM_LEN]
         .copy_from_slice(&g_x[..]);
+
     let c_i = c_i.as_cbor();
     output.len = 3 + raw_suites_len + P256_ELEM_LEN + c_i.len();
     output.content[3 + raw_suites_len + P256_ELEM_LEN..][..c_i.len()].copy_from_slice(c_i);
 
-    if let Some(ead_1) = ead_1 {
-        match encode_ead_item(ead_1) {
-            Ok(ead_1) => output
-                .extend_from_slice(ead_1.as_slice())
-                .and(Ok(output))
-                .or(Err(EDHOCError::EadTooLongError)),
-            Err(e) => Err(e),
+    // Encode optional EAD_1
+    if !ead_1.is_empty() {
+        // EAD_1 is an array of at least one element
+        let array_len = ead_1.len();
+        output
+            .extend_from_slice(&[CBOR_MAJOR_ARRAY + (array_len as u8)])
+            .map_err(|_| EDHOCError::EadTooLongError)?;
+
+        for ead in ead_1 {
+            let encoded = encode_ead_item(ead)?;
+            output
+                .extend_from_slice(encoded.as_slice())
+                .map_err(|_| EDHOCError::EadTooLongError)?;
         }
-    } else {
-        Ok(output)
     }
+
+    Ok(output)
+    // if let Some(ead_1) = ead_1 {
+    //     match encode_ead_item(ead_1) {
+    //         Ok(ead_1) => output
+    //             .extend_from_slice(ead_1.as_slice())
+    //             .and(Ok(output))
+    //             .or(Err(EDHOCError::EadTooLongError)),
+    //         Err(e) => Err(e),
+    //     }
+    // } else {
+    //     Ok(output)
+    // }
 }
 
 fn encode_message_2(g_y: &BytesP256ElemLen, ciphertext_2: &BufferCiphertext2) -> BufferMessage2 {
@@ -1208,9 +1226,9 @@ mod tests {
     const MESSAGE_1_WITH_DUMMY_EAD_NO_VALUE_TV: &str =
         "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b63701";
     const MESSAGE_1_WITH_DUMMY_EAD_TV: &str =
-        "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b63701cccccc";
+        "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b6378101cccccc";
     const MESSAGE_1_WITH_DUMMY_CRITICAL_EAD_TV: &str =
-        "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b63720cccccc";
+        "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b6378120cccccc";
     const G_Y_TV: BytesP256ElemLen =
         hex!("419701d7f00a26c2dc587a36dd752549f33763c893422c8ea0f955a13a4ff5d5");
     const C_R_TV: ConnId = ConnId::from_int_raw(0x27);
@@ -1292,8 +1310,7 @@ mod tests {
     #[test]
     fn test_encode_message_1() {
         let suites_i_tv = EdhocBuffer::from_hex(SUITES_I_TV);
-        let message_1 =
-            encode_message_1(METHOD_TV, &suites_i_tv, &G_X_TV, C_I_TV, &None::<EADItem>).unwrap();
+        let message_1 = encode_message_1(METHOD_TV, &suites_i_tv, &G_X_TV, C_I_TV, &[]).unwrap();
 
         assert_eq!(message_1.len, 39);
         assert_eq!(message_1, BufferMessage1::from_hex(MESSAGE_1_TV));
@@ -1361,7 +1378,7 @@ mod tests {
         assert_eq!(suites_i, suites_i_tv_first_time);
         assert_eq!(g_x, G_X_TV_FIRST_TIME);
         assert_eq!(c_i, C_I_TV_FIRST_TIME);
-        assert!(ead_1.is_none());
+        assert_eq!(ead_1.len, 0);
 
         // second time message_1
         let res = parse_message_1(&message_1_tv);
@@ -1372,7 +1389,7 @@ mod tests {
         assert_eq!(suites_i, suites_i_tv);
         assert_eq!(g_x, G_X_TV);
         assert_eq!(c_i, C_I_TV);
-        assert!(ead_1.is_none());
+        assert_eq!(ead_1.len, 0);
     }
 
     #[test]
@@ -1721,7 +1738,7 @@ mod tests {
             value: Some(EdhocMessageBuffer::from_hex(EAD_DUMMY_VALUE_TV)),
         };
 
-        let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &Some(ead_item));
+        let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &[ead_item]);
         assert!(res.is_ok());
         let message_1 = res.unwrap();
 
@@ -1744,7 +1761,7 @@ mod tests {
             value: Some(ead_value),
         };
 
-        let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &Some(ead_item));
+        let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &[ead_item]);
         assert_eq!(res.unwrap_err(), EDHOCError::EadTooLongError);
     }
 
@@ -1754,20 +1771,22 @@ mod tests {
         let message_ead_tv = BufferMessage1::from_hex(MESSAGE_1_WITH_DUMMY_EAD_TV);
         let ead_value_tv = EdhocMessageBuffer::from_hex(EAD_DUMMY_VALUE_TV);
 
-        let res = parse_ead(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]);
-        assert!(res.is_ok());
-        let ead_item = res.unwrap();
-        assert!(ead_item.is_some());
-        let ead_item = ead_item.unwrap();
+        let ead_items =
+            parse_eads(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]).unwrap();
+
+        assert_eq!(ead_items.len, 1);
+        let ead_item = ead_items.data[0];
         assert!(!ead_item.is_critical);
         assert_eq!(ead_item.label, EAD_DUMMY_LABEL_TV);
         assert_eq!(ead_item.value.unwrap().content, ead_value_tv.content);
 
         let message_ead_tv = BufferMessage1::from_hex(MESSAGE_1_WITH_DUMMY_CRITICAL_EAD_TV);
 
-        let res =
-            parse_ead(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]).unwrap();
-        let ead_item = res.unwrap();
+        let ead_items =
+            parse_eads(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]).unwrap();
+
+        assert_eq!(ead_items.len, 1);
+        let ead_item = ead_items.data[0];
         assert!(ead_item.is_critical);
         assert_eq!(ead_item.label, EAD_DUMMY_LABEL_TV);
         assert_eq!(ead_item.value.unwrap().content, ead_value_tv.content);
@@ -1790,7 +1809,9 @@ mod tests {
         let res = parse_message_1(&message_1_ead_tv);
         assert!(res.is_ok());
         let (_method, _suites_i, _g_x, _c_i, ead_1) = res.unwrap();
-        let ead_1 = ead_1.unwrap();
+        assert_eq!(ead_1.len, 1);
+
+        let ead_1 = ead_1.data[0];
         assert!(ead_1.is_critical);
         assert_eq!(ead_1.label, EAD_DUMMY_LABEL_TV);
         assert_eq!(ead_1.value.unwrap().content, ead_value_tv.content);
