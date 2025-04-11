@@ -63,6 +63,7 @@ pub const MAC_LENGTH: usize = 8; // used for EAD Zeroconf
 pub const MAC_LENGTH_2: usize = MAC_LENGTH;
 pub const MAC_LENGTH_3: usize = MAC_LENGTH_2;
 pub const ENCODED_VOUCHER_LEN: usize = 1 + MAC_LENGTH; // 1 byte for the length of the bstr-encoded voucher
+pub const MAX_EAD_ITEMS: usize = 4;
 
 // maximum supported length of connection identifier for R
 //
@@ -676,7 +677,7 @@ impl TryInto<EdhocMessageBuffer> for &[u8] {
 }
 
 #[cfg_attr(feature = "python-bindings", pyclass)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct EADItem {
     /// EAD label of the item
     ///
@@ -739,6 +740,90 @@ mod helpers {
 // TODO: move to own file (or even to the main crate, once EAD is extracted as an external dependency)
 mod edhoc_parser {
     use super::*;
+
+    #[derive(Debug)]
+    pub struct EdhocEadBuffer<const N: usize> {
+        pub data: [EADItem; N],
+        pub len: usize,
+    }
+
+    impl<const N: usize> EdhocEadBuffer<N> {
+        pub fn new() -> Self {
+            EdhocEadBuffer {
+                data: [EADItem::new(); N],
+                len: 0,
+            }
+        }
+
+        pub fn push(&mut self, item: EADItem) -> Result<(), ()> {
+            if self.len < N {
+                self.data[self.len] = item;
+                self.len += 1;
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+    }
+
+    pub fn parse_eads(buffer: &[u8]) -> Result<EdhocEadBuffer<MAX_EAD_ITEMS>, EDHOCError> {
+        trace!("Enter parse_eads");
+        let mut cursor = 0;
+        let mut ead_items = EdhocEadBuffer::new();
+
+        if buffer.is_empty() {
+            return Ok(ead_items); // no EAD
+        }
+
+        let first = buffer[cursor];
+
+        if !(CBOR_MAJOR_ARRAY..=CBOR_MAJOR_ARRAY + MAX_EAD_ITEMS as u8).contains(&first) {
+            return Err(EDHOCError::ParsingError);
+        }
+
+        let num_items = (first & 0x1F) as usize;
+        cursor += 1;
+
+        for i in 0..num_items {
+            if cursor >= buffer.len() {
+                return Err(EDHOCError::ParsingError);
+            }
+
+            let label_byte = buffer[cursor];
+            cursor += 1;
+
+            let (label, is_critical) = if CBORDecoder::is_u8(label_byte) {
+                (label_byte, false)
+            } else if CBORDecoder::is_i8(label_byte) {
+                (label_byte - (CBOR_NEG_INT_1BYTE_START - 1), true)
+            } else {
+                return Err(EDHOCError::ParsingError);
+            };
+
+            let remaining = &buffer[cursor..];
+            let value = if !remaining.is_empty() {
+                // Try parsing value only if CBOR type is recognizable (byte string, int, etc)
+                // You can refine this depending on your CBOR types
+                let len = remaining.len();
+                let mut buf = EdhocMessageBuffer::new();
+                buf.fill_with_slice(remaining).unwrap();
+                buf.len = len;
+                cursor += len;
+                Some(buf)
+            } else {
+                None
+            };
+
+            ead_items
+                .push(EADItem {
+                    label: label.into(),
+                    is_critical,
+                    value,
+                })
+                .map_err(|_| EDHOCError::EadTooLongError)?;
+        }
+        Ok(ead_items)
+    }
 
     pub fn parse_ead(buffer: &[u8]) -> Result<Option<EADItem>, EDHOCError> {
         trace!("Enter parse_ead");
@@ -820,7 +905,7 @@ mod edhoc_parser {
             EdhocBuffer<MAX_SUITES_LEN>,
             BytesP256ElemLen,
             ConnId,
-            Option<EADItem>,
+            EdhocEadBuffer<MAX_EAD_ITEMS>,
         ),
         EDHOCError,
     > {
@@ -839,14 +924,14 @@ mod edhoc_parser {
             if rcvd_message_1.len > decoder.position() {
                 // NOTE: since the current implementation only supports one EAD handler,
                 // we assume only one EAD item
-                let ead_res = parse_ead(decoder.remaining_buffer()?);
+                let ead_res = parse_eads(decoder.remaining_buffer()?);
                 if let Ok(ead_1) = ead_res {
                     Ok((method, suites_i, g_x, c_i, ead_1))
                 } else {
                     Err(ead_res.unwrap_err())
                 }
             } else if decoder.finished() {
-                Ok((method, suites_i, g_x, c_i, None))
+                Ok((method, suites_i, g_x, c_i, EdhocEadBuffer::new()))
             } else {
                 Err(EDHOCError::ParsingError)
             }
