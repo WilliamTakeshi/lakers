@@ -721,7 +721,7 @@ mod test {
         let initiator = initiator.verify_message_2(valid_cred_r).unwrap();
 
         // if needed: prepare ead_3
-        let (mut initiator, message_3, i_prk_out) = initiator
+        let (initiator, message_3, i_prk_out) = initiator
             .prepare_message_3(CredentialTransfer::ByReference, &None)
             .unwrap();
         // ---- end initiator handling
@@ -729,13 +729,13 @@ mod test {
         // ---- begin responder handling
         let (responder, id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
         let valid_cred_i = credential_check_or_fetch(Some(cred_i), id_cred_i).unwrap();
-        let (mut responder, r_prk_out) = responder.verify_message_3(valid_cred_i).unwrap();
+        let (responder, r_prk_out) = responder.verify_message_3(valid_cred_i).unwrap();
 
         // Send message_4
         let (mut responder, message_4) = responder.prepare_message_4(&None).unwrap();
         // ---- end responder handling
 
-        let (mut initiator, ead_4) = initiator.process_message_4(&message_4).unwrap();
+        let (mut initiator, _ead_4) = initiator.process_message_4(&message_4).unwrap();
         // ---- end initiator handling
 
         // check that prk_out is equal at initiator and responder side
