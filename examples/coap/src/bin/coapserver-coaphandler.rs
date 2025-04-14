@@ -122,7 +122,8 @@ impl coap_handler::Handler for EdhocHandler {
             .process_message_1(message_1)
             .map_err(render_error)?;
 
-            let ead_2 = if let Some(ead_1) = ead_1 {
+            let ead_2 = if ead_1.len == 1 {
+                let ead_1 = ead_1.data[0];
                 let authenticator = ZeroTouchAuthenticator::default();
                 let (authenticator, _loc_w, voucher_request) = authenticator
                     .process_ead_1(&ead_1, &message_1)
