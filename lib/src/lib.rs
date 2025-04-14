@@ -134,7 +134,14 @@ impl<Crypto: CryptoTrait> EdhocResponder<Crypto> {
     pub fn process_message_1(
         mut self,
         message_1: &BufferMessage1,
-    ) -> Result<(EdhocResponderProcessedM1<Crypto>, ConnId, Option<EADItem>), EDHOCError> {
+    ) -> Result<
+        (
+            EdhocResponderProcessedM1<Crypto>,
+            ConnId,
+            EdhocEadBuffer<MAX_EAD_ITEMS>,
+        ),
+        EDHOCError,
+    > {
         trace!("Enter process_message_1");
         let (state, c_i, ead_1) = r_process_message_1(&self.state, &mut self.crypto, message_1)?;
 
@@ -314,7 +321,7 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiator<Crypto> {
     pub fn prepare_message_1(
         mut self,
         c_i: Option<ConnId>,
-        ead_1: &Option<EADItem>,
+        ead_1: &[EADItem],
     ) -> Result<(EdhocInitiatorWaitM2<Crypto>, EdhocMessageBuffer), EDHOCError> {
         trace!("Enter prepare_message_1");
         let c_i = match c_i {
@@ -634,7 +641,7 @@ mod test {
         );
 
         let c_i = generate_connection_identifier_cbor(&mut default_crypto());
-        let result = initiator.prepare_message_1(Some(c_i), &None);
+        let result = initiator.prepare_message_1(Some(c_i), &[]);
         assert!(result.is_ok());
     }
 
@@ -695,7 +702,7 @@ mod test {
 
         // ---- begin initiator handling
         // if needed: prepare ead_1
-        let (initiator, message_1) = initiator.prepare_message_1(None, &None).unwrap();
+        let (initiator, message_1) = initiator.prepare_message_1(None, &[]).unwrap();
         // ---- end initiator handling
 
         // ---- begin responder handling
@@ -836,7 +843,8 @@ mod test_authz {
         device.set_h_message_1(initiator.state.h_message_1.clone());
 
         let (responder, _c_i, ead_1) = responder.process_message_1(&message_1).unwrap();
-        let ead_2 = if let Some(ead_1) = ead_1 {
+        let ead_2 = if ead_1.len == 1 {
+            let ead_1 = ead_1.data[0];
             let (authenticator, _loc_w, voucher_request) =
                 authenticator.process_ead_1(&ead_1, &message_1).unwrap();
 
