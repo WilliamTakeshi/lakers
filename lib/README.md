@@ -40,7 +40,7 @@ Here's a quick look at the API for the Initiator role (for the Responder role, a
 // perform the handshake
 let initiator = EdhocInitiator::new(default_crypto());
 
-let (initiator, message_1) = initiator.prepare_message_1(None, &None)?; // c_i and ead_1 are set to None
+let (initiator, message_1) = initiator.prepare_message_1(None, &EADItem::new_many())?; // c_i and ead_1 are set to None
 
 let (initiator, _c_r, id_cred_r, _ead_2) = initiator.parse_message_2(&message_2)?;
 let valid_cred_r = credential_check_or_fetch(Some(CRED_R), id_cred_r)?; // CRED_R contains Responder's public key

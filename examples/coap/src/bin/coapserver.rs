@@ -60,7 +60,11 @@ fn main() {
                 if let Ok((responder, _c_i, ead_1)) = result {
                     let c_r =
                         generate_connection_identifier_cbor(&mut lakers_crypto::default_crypto());
-                    let ead_2 = if let Some(ead_1) = ead_1 {
+
+                    // TODO(Will): Understand this
+                    let mut ead_2 = EADItem::new_many();
+                    if ead_1[0].value.is_some() {
+                        let ead_1 = &ead_1[0];
                         let authenticator = ZeroTouchAuthenticator::default();
                         let (authenticator, _loc_w, voucher_request) =
                             authenticator.process_ead_1(&ead_1, &message_1).unwrap();
@@ -75,9 +79,8 @@ fn main() {
 
                         let res = authenticator.prepare_ead_2(&voucher_response);
                         assert!(res.is_ok());
-                        authenticator.prepare_ead_2(&voucher_response).ok()
-                    } else {
-                        None
+
+                        ead_2[0] = res.unwrap();
                     };
                     let (responder, message_2) = responder
                         .prepare_message_2(CredentialTransfer::ByReference, Some(c_r), &ead_2)
@@ -112,7 +115,8 @@ fn main() {
                     println!("EDHOC error at verify_message_3: {:?}", valid_cred_i);
                     continue;
                 };
-                let (mut responder, message_4) = responder.prepare_message_4(&None).unwrap();
+                let (mut responder, message_4) =
+                    responder.prepare_message_4(&EADItem::new_many()).unwrap();
                 // send empty ack back
                 response.message.payload = Vec::from(message_4.as_slice());
 

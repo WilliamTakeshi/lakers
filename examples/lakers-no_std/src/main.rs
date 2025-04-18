@@ -91,7 +91,7 @@ fn main() -> ! {
 
         let _c_i =
             generate_connection_identifier_cbor(&mut lakers_crypto::default_crypto()).as_slice();
-        let message_1 = initiator.prepare_message_1(None, &None);
+        let message_1 = initiator.prepare_message_1(None, &EADItem::new_many());
         assert!(message_1.is_ok());
     }
 
@@ -114,11 +114,15 @@ fn main() -> ! {
             cred_r.clone(),
         );
 
-        let (initiator, message_1) = initiator.prepare_message_1(None, &None).unwrap();
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EADItem::new_many()).unwrap();
 
         let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
         let (responder, message_2) = responder
-            .prepare_message_2(CredentialTransfer::ByReference, None, &None)
+            .prepare_message_2(
+                CredentialTransfer::ByReference,
+                None,
+                &EADItem::new_many(),
+            )
             .unwrap();
 
         let (mut initiator, _c_r, id_cred_r, _ead_2) =
