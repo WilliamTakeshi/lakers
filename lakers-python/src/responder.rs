@@ -50,7 +50,7 @@ impl PyEdhocResponder {
         &mut self,
         py: Python<'a>,
         message_1: Vec<u8>,
-    ) -> PyResult<(Bound<'a, PyBytes>, Option<EADItem>)> {
+    ) -> PyResult<(Bound<'a, PyBytes>, [EADItem; MAX_EAD_ITEMS])> {
         let message_1 = EdhocMessageBuffer::new_from_slice(message_1.as_slice())?;
         let (state, c_i, ead_1) = r_process_message_1(
             &self.start.take().ok_or(StateMismatch)?,
@@ -67,13 +67,13 @@ impl PyEdhocResponder {
     ///
     /// Input influences whether the credential is sent by value or reference, which credential is
     /// sent, and whether any optional EAD data is to be sent.
-    #[pyo3(signature = (cred_transfer, c_r=None, ead_2=None))]
+    #[pyo3(signature = (cred_transfer, c_r=None, ead_2=EADItem::new_many()))]
     fn prepare_message_2<'a>(
         &mut self,
         py: Python<'a>,
         cred_transfer: CredentialTransfer,
         c_r: Option<Vec<u8>>,
-        ead_2: Option<EADItem>,
+        ead_2: [EADItem; MAX_EAD_ITEMS],
     ) -> PyResult<Bound<'a, PyBytes>> {
         let c_r = match c_r {
             Some(c_r) => ConnId::from_slice(c_r.as_slice()).ok_or(
@@ -114,7 +114,7 @@ impl PyEdhocResponder {
         &mut self,
         py: Python<'a>,
         message_3: Vec<u8>,
-    ) -> PyResult<(Bound<'a, PyBytes>, Option<EADItem>)> {
+    ) -> PyResult<(Bound<'a, PyBytes>, [EADItem; MAX_EAD_ITEMS])> {
         let message_3 = EdhocMessageBuffer::new_from_slice(message_3.as_slice())?;
         match r_parse_message_3(
             &mut self.wait_m3.take().ok_or(StateMismatch)?,
@@ -157,11 +157,11 @@ impl PyEdhocResponder {
     /// This may contain additional EAD data.
     ///
     /// After generating this message, the protocol has completed.
-    #[pyo3(signature = (ead_4=None))]
+    #[pyo3(signature = (ead_4=EADItem::new_many()))]
     fn prepare_message_4<'a>(
         &mut self,
         py: Python<'a>,
-        ead_4: Option<EADItem>,
+        ead_4: [EADItem; MAX_EAD_ITEMS],
     ) -> PyResult<Bound<'a, PyBytes>> {
         match r_prepare_message_4(
             &self.processed_m3.take().ok_or(StateMismatch)?,
