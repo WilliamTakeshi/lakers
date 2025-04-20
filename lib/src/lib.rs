@@ -719,11 +719,7 @@ mod test {
         // if ead_1: process ead_1
         // if needed: prepare ead_2
         let (responder, message_2) = responder
-            .prepare_message_2(
-                CredentialTransfer::ByReference,
-                None,
-                &EADItem::new_many(),
-            )
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EADItem::new_many())
             .unwrap();
         // ---- end responder handling
 
@@ -751,8 +747,7 @@ mod test {
         let (mut responder, r_prk_out) = responder.verify_message_3(valid_cred_i).unwrap();
 
         // Send message_4
-        let (mut responder, message_4) =
-            responder.prepare_message_4(&EADItem::new_many()).unwrap();
+        let (mut responder, message_4) = responder.prepare_message_4(&EADItem::new_many()).unwrap();
         // ---- end responder handling
 
         let (mut initiator, ead_4) = initiator.process_message_4(&message_4).unwrap();

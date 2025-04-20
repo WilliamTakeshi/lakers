@@ -83,7 +83,11 @@ impl PyEdhocInitiator {
         &mut self,
         py: Python<'a>,
         message_2: Vec<u8>,
-    ) -> PyResult<(Bound<'a, PyBytes>, Bound<'a, PyBytes>, [EADItem; MAX_EAD_ITEMS])> {
+    ) -> PyResult<(
+        Bound<'a, PyBytes>,
+        Bound<'a, PyBytes>,
+        [EADItem; MAX_EAD_ITEMS],
+    )> {
         let message_2 = EdhocMessageBuffer::new_from_slice(message_2.as_slice())?;
 
         match i_parse_message_2(

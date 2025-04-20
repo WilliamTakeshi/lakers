@@ -114,15 +114,13 @@ fn main() -> ! {
             cred_r.clone(),
         );
 
-        let (initiator, message_1) = initiator.prepare_message_1(None, &EADItem::new_many()).unwrap();
+        let (initiator, message_1) = initiator
+            .prepare_message_1(None, &EADItem::new_many())
+            .unwrap();
 
         let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
         let (responder, message_2) = responder
-            .prepare_message_2(
-                CredentialTransfer::ByReference,
-                None,
-                &EADItem::new_many(),
-            )
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EADItem::new_many())
             .unwrap();
 
         let (mut initiator, _c_r, id_cred_r, _ead_2) =
