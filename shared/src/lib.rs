@@ -796,9 +796,45 @@ mod edhoc_parser {
         };
 
         let ead_value = if let Some(&bstr_head) = input.get(offset) {
-            if bstr_head >= 0x40 && bstr_head <= 0x57 {
-                let len = (bstr_head & 0x1f) as usize;
+            if (bstr_head & 0xe0) == 0x40 {
+                let additional_info = bstr_head & 0x1f;
                 offset += 1;
+
+                // Decode the length based on additional_info
+                let len = match additional_info {
+                    0..=23 => additional_info as usize,
+                    24 => {
+                        let len_byte = *input.get(offset).ok_or(EDHOCError::ParsingError)? as usize;
+                        offset += 1;
+                        len_byte
+                    }
+                    25 => {
+                        let len_bytes = input
+                            .get(offset..offset + 2)
+                            .ok_or(EDHOCError::ParsingError)?;
+                        offset += 2;
+                        u16::from_be_bytes(len_bytes.try_into().unwrap()) as usize
+                    }
+                    26 => {
+                        let len_bytes = input
+                            .get(offset..offset + 4)
+                            .ok_or(EDHOCError::ParsingError)?;
+                        offset += 4;
+                        u32::from_be_bytes(len_bytes.try_into().unwrap()) as usize
+                    }
+                    27 => {
+                        let len_bytes = input
+                            .get(offset..offset + 8)
+                            .ok_or(EDHOCError::ParsingError)?;
+                        offset += 8;
+                        let len_u64 = u64::from_be_bytes(len_bytes.try_into().unwrap());
+                        if len_u64 > usize::MAX as u64 {
+                            return Err(EDHOCError::ParsingError);
+                        }
+                        len_u64 as usize
+                    }
+                    _ => return Err(EDHOCError::ParsingError),
+                };
 
                 let bstr_bytes = input
                     .get(offset..offset + len)

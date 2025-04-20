@@ -853,12 +853,15 @@ mod test_authz {
             initiator.compute_ephemeral_secret(&device.g_w),
             initiator.selected_cipher_suite(),
         );
-        let (initiator, message_1) = initiator.prepare_message_1(None, &Some(ead_1)).unwrap();
+        let mut eads_1 = EADItem::new_many();
+        eads_1[0] = ead_1;
+        let (initiator, message_1) = initiator.prepare_message_1(None, &eads_1).unwrap();
         device.set_h_message_1(initiator.state.h_message_1.clone());
 
         let (responder, _c_i, ead_1) = responder.process_message_1(&message_1).unwrap();
-        let ead_2 = if ead_1.len == 1 {
-            let ead_1 = ead_1[0];
+        // TODO: FIX
+        let ead_2 = if eads_1[0].value.is_some() {
+            let ead_1 = &eads_1[0];
             let (authenticator, _loc_w, voucher_request) =
                 authenticator.process_ead_1(&ead_1, &message_1).unwrap();
 
@@ -869,9 +872,12 @@ mod test_authz {
 
             let res = authenticator.prepare_ead_2(&voucher_response);
             assert!(res.is_ok());
-            authenticator.prepare_ead_2(&voucher_response).ok()
+            let mut eads_2 = EADItem::new_many();
+            eads_2[0] = authenticator.prepare_ead_2(&voucher_response).unwrap();
+
+            eads_2
         } else {
-            None
+            EADItem::new_many()
         };
         let (responder, message_2) = responder
             .prepare_message_2(CredentialTransfer::ByValue, None, &ead_2)
@@ -880,8 +886,8 @@ mod test_authz {
         let (mut initiator, _c_r, id_cred_r, ead_2) =
             initiator.parse_message_2(&message_2).unwrap();
         let valid_cred_r = credential_check_or_fetch(None, id_cred_r).unwrap();
-        if let Some(ead_2) = ead_2 {
-            let result = device.process_ead_2(&mut default_crypto(), ead_2, CRED_R);
+        if ead_2[0].value.is_some() {
+            let result = device.process_ead_2(&mut default_crypto(), ead_2[0].clone(), CRED_R);
             assert!(result.is_ok());
         }
         initiator
@@ -893,7 +899,7 @@ mod test_authz {
         let initiator = initiator.verify_message_2(valid_cred_r).unwrap();
 
         let (mut initiator, message_3, i_prk_out) = initiator
-            .prepare_message_3(CredentialTransfer::ByReference, &None)
+            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_many())
             .unwrap();
         let _initiator = initiator.completed_without_message_4();
         let (responder, id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();

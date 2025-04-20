@@ -46,7 +46,7 @@ let (initiator, _c_r, id_cred_r, _ead_2) = initiator.parse_message_2(&message_2)
 let valid_cred_r = credential_check_or_fetch(Some(CRED_R), id_cred_r)?; // CRED_R contains Responder's public key
 let initiator = initiator.verify_message_2(I, cred_i, valid_cred_r)?; // I is Initiator's private key
 
-let (mut initiator, message_3, i_prk_out) = initiator.prepare_message_3(CredentialTransfer::ByReference, &None)?; // no ead_3
+let (mut initiator, message_3, i_prk_out) = initiator.prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_many())?; // no ead_3
 
 // derive a secret to use with OSCORE
 let oscore_secret = initiator.edhoc_exporter(0u8, &[], 16); // label is 0

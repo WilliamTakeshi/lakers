@@ -137,7 +137,7 @@ fn main() -> ! {
         let initiator = initiator.verify_message_2(valid_cred_r).unwrap();
 
         let (initiator, message_3, i_prk_out) = initiator
-            .prepare_message_3(CredentialTransfer::ByReference, &None)
+            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_many())
             .unwrap();
 
         let (responder, id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();

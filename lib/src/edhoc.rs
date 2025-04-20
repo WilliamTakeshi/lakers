@@ -514,9 +514,21 @@ fn encode_ead_item(ead_1: &EADItem) -> Result<EdhocMessageBuffer, EDHOCError> {
 
         // encode value
         if let Some(ead_1_value) = &ead_1.value {
-            output
-                .extend_from_slice(&[CBOR_MAJOR_BYTE_STRING + ead_1_value.len as u8]) // FIXME: this only works for n <= 23
-                .map_err(|_| EDHOCError::EadTooLongError)?;
+            if ead_1_value.len <= 23 {
+                output.push(CBOR_MAJOR_BYTE_STRING + ead_1_value.len as u8);
+            } else if ead_1_value.len <= u8::MAX as usize {
+                output.extend_from_slice(&[0x58, ead_1_value.len as u8]);
+            } else if ead_1_value.len <= u16::MAX as usize {
+                output.push(0x59);
+                output.extend_from_slice(&(ead_1_value.len as u16).to_be_bytes());
+            } else if ead_1_value.len <= u32::MAX as usize {
+                output.push(0x5a);
+                output.extend_from_slice(&(ead_1_value.len as u32).to_be_bytes());
+            } else {
+                output.push(0x5b);
+                output.extend_from_slice(&(ead_1_value.len as u64).to_be_bytes());
+            }
+
             output
                 .extend_from_slice(ead_1_value.as_slice())
                 .map_err(|_| EDHOCError::EadTooLongError)?;
@@ -701,9 +713,7 @@ fn encode_plaintext_3(
     Ok(plaintext_3)
 }
 
-fn encode_plaintext_4(
-    ead_4: &[EADItem; MAX_EAD_ITEMS],
-) -> Result<BufferPlaintext4, EDHOCError> {
+fn encode_plaintext_4(ead_4: &[EADItem; MAX_EAD_ITEMS]) -> Result<BufferPlaintext4, EDHOCError> {
     let mut plaintext_4: BufferPlaintext4 = BufferPlaintext4::new();
 
     // Encode optional EAD_4
@@ -1374,7 +1384,6 @@ mod tests {
         assert_eq!(c_i, C_I_TV_FIRST_TIME);
         assert!(ead_1[0].value.is_none());
 
-
         // second time message_1
         let res = parse_message_1(&message_1_tv);
         assert!(res.is_ok());
@@ -1772,7 +1781,6 @@ mod tests {
         let message_ead_tv = BufferMessage1::from_hex(MESSAGE_1_WITH_DUMMY_EAD_TV);
         let ead_value_tv = EdhocMessageBuffer::from_hex(EAD_DUMMY_VALUE_TV);
 
-        dbg!(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]);
         let ead_items =
             parse_eads(&message_ead_tv.content[message_tv_offset..message_ead_tv.len]).unwrap();
 
@@ -1825,7 +1833,6 @@ mod tests {
         let ead_value_tv = EdhocMessageBuffer::from_hex(EAD_DUMMY_VALUE_TV);
 
         let res = parse_message_1(&message_1_ead_tv);
-        dbg!(&res);
         assert!(res.is_ok());
         let (_method, _suites_i, _g_x, _c_i, ead_1) = res.unwrap();
 
