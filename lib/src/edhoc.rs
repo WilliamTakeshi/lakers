@@ -514,21 +514,6 @@ fn encode_ead_item(ead_1: &EADItem) -> Result<EdhocMessageBuffer, EDHOCError> {
 
         // encode value
         if let Some(ead_1_value) = &ead_1.value {
-            if ead_1_value.len <= 23 {
-                output.push(CBOR_MAJOR_BYTE_STRING + ead_1_value.len as u8);
-            } else if ead_1_value.len <= u8::MAX as usize {
-                output.extend_from_slice(&[0x58, ead_1_value.len as u8]);
-            } else if ead_1_value.len <= u16::MAX as usize {
-                output.push(0x59);
-                output.extend_from_slice(&(ead_1_value.len as u16).to_be_bytes());
-            } else if ead_1_value.len <= u32::MAX as usize {
-                output.push(0x5a);
-                output.extend_from_slice(&(ead_1_value.len as u32).to_be_bytes());
-            } else {
-                output.push(0x5b);
-                output.extend_from_slice(&(ead_1_value.len as u64).to_be_bytes());
-            }
-
             output
                 .extend_from_slice(ead_1_value.as_slice())
                 .map_err(|_| EDHOCError::EadTooLongError)?;
@@ -1216,7 +1201,7 @@ mod tests {
     // message with an array having too many cipher suites (more than 9)
     const MESSAGE_1_TV_SUITE_ONLY_ERR: &str = "038A02020202020202020202";
     const EAD_DUMMY_LABEL_TV: u16 = 0x01;
-    const EAD_DUMMY_VALUE_TV: &str = "cccccc";
+    const EAD_DUMMY_VALUE_TV: &str = "43cccccc";
     const EAD_DUMMY_CRITICAL_TV: &str = "2043cccccc";
     const MESSAGE_1_WITH_DUMMY_EAD_NO_VALUE_TV: &str =
         "0382060258208af6f430ebe18d34184017a9a11bf511c8dff8f834730b96c1b7c8dbca2fc3b63701";
