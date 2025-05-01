@@ -648,7 +648,7 @@ mod test {
         );
 
         let c_i = generate_connection_identifier_cbor(&mut default_crypto());
-        let result = initiator.prepare_message_1(Some(c_i), &EADItem::new_many());
+        let result = initiator.prepare_message_1(Some(c_i), &EADItem::new_array());
         assert!(result.is_ok());
     }
 
@@ -710,7 +710,7 @@ mod test {
         // ---- begin initiator handling
         // if needed: prepare ead_1
         let (initiator, message_1) = initiator
-            .prepare_message_1(None, &EADItem::new_many())
+            .prepare_message_1(None, &EADItem::new_array())
             .unwrap();
         // ---- end initiator handling
 
@@ -719,7 +719,7 @@ mod test {
         // if ead_1: process ead_1
         // if needed: prepare ead_2
         let (responder, message_2) = responder
-            .prepare_message_2(CredentialTransfer::ByReference, None, &EADItem::new_many())
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EADItem::new_array())
             .unwrap();
         // ---- end responder handling
 
@@ -737,7 +737,7 @@ mod test {
 
         // if needed: prepare ead_3
         let (mut initiator, message_3, i_prk_out) = initiator
-            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_many())
+            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_array())
             .unwrap();
         // ---- end initiator handling
 
@@ -747,7 +747,8 @@ mod test {
         let (mut responder, r_prk_out) = responder.verify_message_3(valid_cred_i).unwrap();
 
         // Send message_4
-        let (mut responder, message_4) = responder.prepare_message_4(&EADItem::new_many()).unwrap();
+        let (mut responder, message_4) =
+            responder.prepare_message_4(&EADItem::new_array()).unwrap();
         // ---- end responder handling
 
         let (mut initiator, ead_4) = initiator.process_message_4(&message_4).unwrap();
@@ -848,7 +849,7 @@ mod test_authz {
             initiator.compute_ephemeral_secret(&device.g_w),
             initiator.selected_cipher_suite(),
         );
-        let mut eads_1 = EADItem::new_many();
+        let mut eads_1 = EADItem::new_array();
         eads_1[0] = ead_1;
         let (initiator, message_1) = initiator.prepare_message_1(None, &eads_1).unwrap();
         device.set_h_message_1(initiator.state.h_message_1.clone());
@@ -867,12 +868,12 @@ mod test_authz {
 
             let res = authenticator.prepare_ead_2(&voucher_response);
             assert!(res.is_ok());
-            let mut eads_2 = EADItem::new_many();
+            let mut eads_2 = EADItem::new_array();
             eads_2[0] = authenticator.prepare_ead_2(&voucher_response).unwrap();
 
             eads_2
         } else {
-            EADItem::new_many()
+            EADItem::new_array()
         };
         let (responder, message_2) = responder
             .prepare_message_2(CredentialTransfer::ByValue, None, &ead_2)
@@ -894,7 +895,7 @@ mod test_authz {
         let initiator = initiator.verify_message_2(valid_cred_r).unwrap();
 
         let (mut initiator, message_3, i_prk_out) = initiator
-            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_many())
+            .prepare_message_3(CredentialTransfer::ByReference, &EADItem::new_array())
             .unwrap();
         let _initiator = initiator.completed_without_message_4();
         let (responder, id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();

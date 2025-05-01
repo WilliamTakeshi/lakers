@@ -699,7 +699,7 @@ impl EADItem {
         }
     }
 
-    pub fn new_many() -> [EADItem; MAX_EAD_ITEMS] {
+    pub fn new_array() -> [EADItem; MAX_EAD_ITEMS] {
         core::array::from_fn(|_| EADItem::new())
     }
 }
@@ -765,7 +765,7 @@ mod edhoc_parser {
     pub fn parse_eads(buffer: &[u8]) -> Result<[EADItem; MAX_EAD_ITEMS], EDHOCError> {
         let mut count = 0;
         let mut cursor = 0;
-        let mut eads = EADItem::new_many();
+        let mut eads = EADItem::new_array();
 
         for _ in 0..MAX_EAD_ITEMS {
             if !buffer[cursor..].is_empty() {
@@ -968,7 +968,7 @@ mod edhoc_parser {
                     Err(ead_res.unwrap_err())
                 }
             } else if decoder.finished() {
-                Ok((method, suites_i, g_x, c_i, EADItem::new_many()))
+                Ok((method, suites_i, g_x, c_i, EADItem::new_array()))
             } else {
                 Err(EDHOCError::ParsingError)
             }
@@ -1033,7 +1033,7 @@ mod edhoc_parser {
                 Err(ead_res.unwrap_err())
             }
         } else if decoder.finished() {
-            Ok((c_r, id_cred_r, mac_2, EADItem::new_many()))
+            Ok((c_r, id_cred_r, mac_2, EADItem::new_array()))
         } else {
             Err(EDHOCError::ParsingError)
         }
@@ -1061,7 +1061,7 @@ mod edhoc_parser {
                 Err(ead_res.unwrap_err())
             }
         } else if decoder.finished() {
-            Ok((id_cred_i, mac_3, EADItem::new_many()))
+            Ok((id_cred_i, mac_3, EADItem::new_array()))
         } else {
             Err(EDHOCError::ParsingError)
         }
@@ -1081,7 +1081,7 @@ mod edhoc_parser {
                 Err(ead_res.unwrap_err())
             }
         } else if decoder.finished() {
-            Ok(EADItem::new_many())
+            Ok(EADItem::new_array())
         } else {
             Err(EDHOCError::ParsingError)
         }

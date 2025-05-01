@@ -1297,7 +1297,7 @@ mod tests {
             &suites_i_tv,
             &G_X_TV,
             C_I_TV,
-            &EADItem::new_many(),
+            &EADItem::new_array(),
         )
         .unwrap();
 
@@ -1527,7 +1527,7 @@ mod tests {
             &TH_3_TV,
             &ID_CRED_I_TV,
             &CRED_I_TV,
-            &EADItem::new_many(),
+            &EADItem::new_array(),
         );
         assert_eq!(mac_3, MAC_3_TV);
     }
@@ -1541,7 +1541,7 @@ mod tests {
             &ID_CRED_R_TV,
             &CRED_R_TV,
             &TH_2_TV,
-            &EADItem::new_many(),
+            &EADItem::new_array(),
         );
 
         assert_eq!(rcvd_mac_2, MAC_2_TV);
@@ -1556,7 +1556,7 @@ mod tests {
                 .unwrap()
                 .as_encoded_value(),
             &MAC_2_TV,
-            &EADItem::new_many(),
+            &EADItem::new_array(),
         )
         .unwrap();
 
@@ -1682,7 +1682,7 @@ mod tests {
                 .unwrap()
                 .as_encoded_value(),
             &MAC_3_TV,
-            &EADItem::new_many(),
+            &EADItem::new_array(),
         )
         .unwrap();
         assert_eq!(plaintext_3, plaintext_3_tv);
@@ -1727,7 +1727,7 @@ mod tests {
             value: Some(EdhocMessageBuffer::from_hex(EAD_DUMMY_VALUE_TV)),
         };
 
-        let mut ead_items = EADItem::new_many();
+        let mut ead_items = EADItem::new_array();
         ead_items[0] = ead_item;
 
         let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &ead_items);
@@ -1753,7 +1753,7 @@ mod tests {
             value: Some(ead_value),
         };
 
-        let mut ead_items = EADItem::new_many();
+        let mut ead_items = EADItem::new_array();
         ead_items[0] = ead_item;
 
         let res = encode_message_1(method_tv, &suites_i_tv, &G_X_TV, c_i_tv, &ead_items);
