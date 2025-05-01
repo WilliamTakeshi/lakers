@@ -62,7 +62,7 @@ fn main() {
                         generate_connection_identifier_cbor(&mut lakers_crypto::default_crypto());
 
                     // TODO(Will): Understand this
-                    let mut ead_2 = EADItem::new_many();
+                    let mut ead_2 = EADItem::new_array();
                     if ead_1[0].value.is_some() {
                         let ead_1 = &ead_1[0];
                         let authenticator = ZeroTouchAuthenticator::default();
@@ -116,7 +116,7 @@ fn main() {
                     continue;
                 };
                 let (mut responder, message_4) =
-                    responder.prepare_message_4(&EADItem::new_many()).unwrap();
+                    responder.prepare_message_4(&EADItem::new_array()).unwrap();
                 // send empty ack back
                 response.message.payload = Vec::from(message_4.as_slice());
 
