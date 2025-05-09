@@ -19,7 +19,7 @@ Ephemeral Diffie-Hellman Over COSE (EDHOC) is a new IETF standard that provides 
 - transport-agnostic: can be used on scenarios with or without IP connectivity; a common way to transport EDHOC is [over reliable CoAP](https://www.rfc-editor.org/rfc/rfc9528.html#coap)
 - code re-use: achieved due to re-using technologies common in IoT scenarios, such as COSE, CBOR, and CoAP
 - finally, a main use case of EDHOC is to establish an [OSCORE](https://datatracker.ietf.org/doc/rfc8613/) security context
-
+a
 
 # lakers features
 
