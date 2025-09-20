@@ -968,7 +968,20 @@ mod tests {
     use hexlit::hex;
     use lakers_crypto::default_crypto;
     // test vectors (TV)
+    // RFC 9529
+    // Authentication with Signatures, X.509 Identified by 'x5t'
+    const X_TV_EXAMPLE_1: [u8; 32] =
+        hex!("892ec28e5cb6669108470539500b705e60d008d347c5817ee9f3327c8a87bb03");
+    const G_X_TV_EXAMPLE_1: BytesX25519ElemLen =
+        hex!("31f82c7b5b9cbbf0f194d913cc12ef1532d328ef32632a4881a1c0701e237f04");
+    const Y_TV_EXAMPLE_1: [u8; 32] =
+        hex!("e69c23fbf81bc435942446837fe827bf206c8fa10a39db47449e5a813421e1e8");
+    const G_Y_TV_EXAMPLE_1: BytesX25519ElemLen =
+        hex!("dc88d2d51da5ed67fc4616356bc8ca74ef9ebe8b387e623a360ba480b9b29d1c");
+    const G_XY_TV_EXAMPLE_1: BytesX25519ElemLen =
+        hex!("e5cdf3a986cdac5b7bf04691e2b07c08e71f53998d8f842b7c3fb4d839cf7b28");
 
+    // Authentication with Static DH, CCS Identified by 'kid'
     // message_1 (first_time)
     const METHOD_TV_FIRST_TIME: u8 = 0x03;
     const SUITES_I_TV_FIRST_TIME: EdhocBuffer<MAX_SUITES_LEN> =
@@ -1103,6 +1116,15 @@ mod tests {
         let g_xy = default_crypto().p256_ecdh(&X_TV, &G_Y_TV);
 
         assert_eq!(g_xy, G_XY_TV);
+    }
+
+    #[test]
+    fn test_x25519() {
+        let g_xy = default_crypto().x25519_ecdh(&X_TV_EXAMPLE_1, &G_Y_TV_EXAMPLE_1);
+        assert_eq!(g_xy, G_XY_TV_EXAMPLE_1);
+
+        let g_xy = default_crypto().x25519_ecdh(&Y_TV_EXAMPLE_1, &G_X_TV_EXAMPLE_1);
+        assert_eq!(g_xy, G_XY_TV_EXAMPLE_1);
     }
 
     #[test]

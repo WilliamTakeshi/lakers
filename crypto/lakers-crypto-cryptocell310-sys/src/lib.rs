@@ -221,6 +221,61 @@ impl CryptoTrait for Crypto {
         output
     }
 
+    fn x25519_ecdh(
+        &self,
+        private_key: &BytesX25519ElemLen,
+        public_key: &BytesX25519ElemLen,
+    ) -> BytesX25519ElemLen {
+        let mut output = [0x0u8; X25519_ELEM_LEN];
+        let mut output_len: u32 = output.len() as u32;
+
+        let mut tmp: CRYS_ECDH_TempData_t = Default::default();
+
+        // Public key is already 32 bytes (Montgomery u-coordinate)
+        let mut public_key_cc310: CRYS_ECPKI_UserPublKey_t = Default::default();
+
+        let domain = unsafe {
+            CRYS_ECPKI_GetEcDomain(CRYS_ECMONT_DomainId_t_CRYS_ECMONT_DOMAIN_CURVE_25519)
+        };
+
+        // Build CC310 public key
+        unsafe {
+            _DX_ECPKI_BuildPublKey(
+                domain,
+                public_key.clone().as_mut_ptr(),
+                X25519_ELEM_LEN as u32,
+                EC_PublKeyCheckMode_t_CheckPointersAndSizesOnly,
+                &mut public_key_cc310,
+                core::ptr::null_mut(),
+            );
+        }
+
+        // Build CC310 private key
+        let mut private_key_cc310: CRYS_ECPKI_UserPrivKey_t = Default::default();
+
+        unsafe {
+            CRYS_ECPKI_BuildPrivKey(
+                domain,
+                private_key.clone().as_mut_ptr(),
+                X25519_ELEM_LEN as u32,
+                &mut private_key_cc310,
+            );
+        }
+
+        // Run ECDH
+        unsafe {
+            CRYS_ECDH_SVDP_DH(
+                &mut public_key_cc310,
+                &mut private_key_cc310,
+                output.as_mut_ptr(),
+                &mut output_len,
+                &mut tmp,
+            );
+        }
+
+        output
+    }
+
     fn get_random_byte(&mut self) -> u8 {
         let mut rnd_context = CRYS_RND_State_t::default();
         let mut rnd_work_buffer = CRYS_RND_WorkBuff_t::default();

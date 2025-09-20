@@ -80,6 +80,11 @@ pub trait Crypto: core::fmt::Debug {
         private_key: &BytesP256ElemLen,
         public_key: &BytesP256ElemLen,
     ) -> BytesP256ElemLen;
+    fn x25519_ecdh(
+        &self,
+        private_key: &BytesX25519ElemLen,
+        public_key: &BytesX25519ElemLen,
+    ) -> BytesX25519ElemLen;
     fn get_random_byte(&mut self) -> u8;
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen);
 }
