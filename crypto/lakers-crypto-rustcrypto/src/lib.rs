@@ -10,6 +10,7 @@ use ccm::KeyInit;
 use p256::elliptic_curve::point::AffineCoordinates;
 use p256::elliptic_curve::point::DecompressPoint;
 use sha2::Digest;
+use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 
 type AesCcm16_64_128 = ccm::Ccm<aes::Aes128, ccm::consts::U8, ccm::consts::U13>;
 
@@ -138,6 +139,14 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
         .expect("Public key is not a good point");
 
         (*p256::ecdh::diffie_hellman(secret.to_nonzero_scalar(), public).raw_secret_bytes()).into()
+    }
+
+    fn x25519_ecdh(&self, private_key: &[u8; 32], public_key: &[u8; 32]) -> [u8; 32] {
+        let my_secret = StaticSecret::from(*private_key);
+        let peer_public = PublicKey::from(*public_key);
+
+        let shared: SharedSecret = my_secret.diffie_hellman(&peer_public);
+        *shared.as_bytes()
     }
 
     fn get_random_byte(&mut self) -> u8 {
