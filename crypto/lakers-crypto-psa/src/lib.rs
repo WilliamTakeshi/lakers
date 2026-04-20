@@ -3,10 +3,10 @@
 use lakers_shared::{Crypto as CryptoTrait, *};
 use psa_crypto::operations::hash::hash_compute;
 use psa_crypto::operations::{aead, key_agreement, key_management, other::generate_random};
-use psa_crypto::types::algorithm::Hash;
-use psa_crypto::types::algorithm::{Aead, AeadWithDefaultLengthTag, KeyAgreement, RawKeyAgreement};
+use psa_crypto::types::algorithm::{
+    Aead, AeadWithDefaultLengthTag, Algorithm, Hash, KeyAgreement, RawKeyAgreement,
+};
 use psa_crypto::types::key::{Attributes, EccFamily, Lifetime, Policy, Type, UsageFlags};
-
 #[no_mangle]
 pub extern "C" fn mbedtls_hardware_poll(
     _data: *mut ::core::ffi::c_void,
@@ -208,6 +208,49 @@ impl CryptoTrait for Crypto {
 
         key_agreement::raw_key_agreement(alg, my_key, &peer_public_key, &mut output_buffer)
             .unwrap();
+
+        output_buffer
+    }
+
+    fn x25519_ecdh(
+        &self,
+        private_key: &BytesX25519ElemLen,
+        public_key: &BytesX25519ElemLen,
+    ) -> BytesX25519ElemLen {
+        // Configure the attributes for an X25519 private key
+        let mut usage_flags: UsageFlags = Default::default();
+        usage_flags.set_derive();
+
+        let attributes = Attributes {
+            key_type: Type::EccKeyPair {
+                curve_family: psa_crypto::types::key::EccFamily::Montgomery,
+            },
+            bits: 255, // X25519 is Curve25519 in Montgomery form
+            lifetime: Lifetime::Volatile,
+            policy: Policy {
+                usage_flags,
+                permitted_algorithms: Algorithm::KeyAgreement(KeyAgreement::Raw(
+                    RawKeyAgreement::Ecdh,
+                )),
+            },
+        };
+
+        psa_crypto::init().unwrap();
+
+        // Import my private key into PSA
+        let my_key = key_management::import(attributes, None, private_key).unwrap();
+
+        // Prepare output buffer for the shared secret
+        let mut output_buffer: [u8; X25519_ELEM_LEN] = [0; X25519_ELEM_LEN];
+
+        // Run the raw ECDH
+        key_agreement::raw_key_agreement(
+            RawKeyAgreement::Ecdh,
+            my_key,
+            public_key,
+            &mut output_buffer,
+        )
+        .unwrap();
 
         output_buffer
     }
