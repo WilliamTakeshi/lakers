@@ -887,16 +887,10 @@ mod helpers {
     use super::*;
 
     #[track_caller]
+    #[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN && length < 256)]
+    #[hax_lib::ensures(|result| result.len() <= MAX_INFO_LEN)]
     pub fn encode_info(label: u8, context: &[u8], length: usize) -> BufferInfo {
         let mut info = BufferInfo::new();
-
-        // This should help the compiler see that this won't panic.
-        assert!(
-            context.len() <= MAX_KDF_CONTEXT_LEN,
-            "Context found to be {} (expected only up to {})",
-            context.len(),
-            SHA256_DIGEST_LEN
-        );
 
         // construct info with inline cbor encoding
         info.push(label).unwrap();
