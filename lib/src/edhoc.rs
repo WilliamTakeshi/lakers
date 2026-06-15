@@ -107,11 +107,15 @@ pub fn r_prepare_message_2(
     let th_3 = compute_th_3(crypto, &th_2, &plaintext_2, cred_r.bytes.as_slice());
 
     let mut ct: BufferCiphertext2 = BufferCiphertext2::new();
-    ct.fill_with_slice(plaintext_2.as_slice()).unwrap(); // TODO(hax): can we prove with hax that this won't panic since they use the same underlying buffer length?
+    // plaintext_2: EdhocBuffer<MAX_MESSAGE_SIZE_LEN> so len <= MAX_MESSAGE_SIZE_LEN == N of ct
+    hax_lib::assert!(plaintext_2.len() <= MAX_MESSAGE_SIZE_LEN);
+    ct.fill_with_slice(plaintext_2.as_slice()).unwrap();
 
     let ciphertext_2 = encrypt_decrypt_ciphertext_2(crypto, &prk_2e, &th_2, &ct);
 
-    ct.fill_with_slice(ciphertext_2.as_slice()).unwrap(); // TODO(hax): same as just above.
+    // ciphertext_2: BufferCiphertext2 = EdhocBuffer<MAX_MESSAGE_SIZE_LEN>, same reasoning
+    hax_lib::assert!(ciphertext_2.len() <= MAX_MESSAGE_SIZE_LEN);
+    ct.fill_with_slice(ciphertext_2.as_slice()).unwrap();
 
     let message_2 = encode_message_2(&state.g_y, &ct);
 
@@ -578,6 +582,8 @@ fn edhoc_kdf_owned<const N: usize>(
     result
 }
 
+#[hax_lib::requires(id_cred_i.len() <= MAX_MESSAGE_SIZE_LEN)]
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_3(
     id_cred_i: &[u8],
     mac_3: &BytesMac3,
@@ -598,6 +604,7 @@ fn encode_plaintext_3(
     Ok(plaintext_3)
 }
 
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_4(ead_4: &EadItems) -> Result<BufferPlaintext4, EDHOCError> {
     let mut plaintext_4: BufferPlaintext4 = BufferPlaintext4::new();
 
@@ -890,6 +897,8 @@ fn compute_mac_2(
     edhoc_kdf_owned(crypto, prk_3e2m, 2_u8, context.as_slice())
 }
 
+#[hax_lib::requires(id_cred_r.len() <= MAX_MESSAGE_SIZE_LEN)]
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_2(
     c_r: ConnId,
     id_cred_r: &[u8],
@@ -902,17 +911,16 @@ fn encode_plaintext_2(
     plaintext_2
         .extend_from_slice(c_r)
         .or(Err(EDHOCError::EncodingError))?;
-    // id_cred_r.write_to_message(&mut plaintext_2)?;
     plaintext_2
         .extend_from_slice(id_cred_r)
         .or(Err(EDHOCError::EncodingError))?;
-
     plaintext_2
         .push(CBOR_MAJOR_BYTE_STRING | MAC_LENGTH_2 as u8)
-        .unwrap();
-    plaintext_2.extend_from_slice(&mac_2[..]).unwrap();
+        .or(Err(EDHOCError::EncodingError))?;
+    plaintext_2
+        .extend_from_slice(&mac_2[..])
+        .or(Err(EDHOCError::EncodingError))?;
 
-    // Encode optional EAD_2
     ead_2.encode(&mut plaintext_2)?;
 
     Ok(plaintext_2)
