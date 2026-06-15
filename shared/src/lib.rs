@@ -616,6 +616,7 @@ pub struct EADItem {
     value: EADBuffer,
 }
 
+#[hax_lib::attributes]
 impl EADItem {
     pub fn new() -> Self {
         EADItem {
@@ -625,6 +626,7 @@ impl EADItem {
         }
     }
 
+    #[hax_lib::ensures(|result| result.is_ok() || value_bytes.map_or(false, |b| b.len() > u16::MAX.into()))]
     pub fn new_full(
         label: u16,
         is_critical: bool,
@@ -635,17 +637,15 @@ impl EADItem {
             let mut head = CBOR_MAJOR_BYTE_STRING;
             if value_bytes.len() <= 23 {
                 head |= value_bytes.len() as u8;
-                value.push(head).unwrap();
+                value.push(head)?;
             } else if value_bytes.len() <= u8::MAX.into() {
                 head |= 24;
-                value.push(head).unwrap();
-                value.push(value_bytes.len() as u8).unwrap();
+                value.push(head)?;
+                value.push(value_bytes.len() as u8)?;
             } else if value_bytes.len() <= u16::MAX.into() {
                 head |= 24;
-                value.push(head).unwrap();
-                value
-                    .extend_from_slice(&(value_bytes.len() as u16).to_be_bytes())
-                    .unwrap();
+                value.push(head)?;
+                value.extend_from_slice(&(value_bytes.len() as u16).to_be_bytes())?;
             } else {
                 // EAD items do not grow beyond 64k
                 return Err(EdhocBufferError::SliceTooLong);
