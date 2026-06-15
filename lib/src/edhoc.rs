@@ -39,7 +39,8 @@ pub fn r_process_message_1(
         match method {
             EDHOCMethod::StatStat => {
                 // Step 2: verify that the selected cipher suite is supported
-                if suites_i[suites_i.len() - 1] == EDHOC_SUPPORTED_SUITES[0] {
+                let last_suite = *suites_i.as_slice().last().ok_or(EDHOCError::ParsingError)?;
+                if last_suite == EDHOC_SUPPORTED_SUITES[0] {
                     // hash message_1 and save the hash to the state to avoid saving the whole message
                     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
                     Ok((
@@ -429,7 +430,11 @@ pub fn i_complete_without_message_4(state: &WaitM4) -> Result<Completed, EDHOCEr
         prk_exporter: state.prk_exporter,
     })
 }
-
+#[hax_lib::requires(
+    suites.len() <= MAX_SUITES_LEN &&
+    suites.len() < 24 &&
+    suites.len() > 0
+)]
 fn encode_message_1(
     method: EDHOCMethod,
     suites: &EdhocBuffer<MAX_SUITES_LEN>,
