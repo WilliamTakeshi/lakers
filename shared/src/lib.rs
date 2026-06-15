@@ -923,7 +923,8 @@ mod edhoc_parser {
         let mut cursor = 0;
         let mut eads = EadItems::new();
 
-        for _ in 0..MAX_EAD_ITEMS {
+        for _i in 0..MAX_EAD_ITEMS {
+            hax_lib::loop_invariant!(count <= _i && cursor <= buffer.len());
             if !buffer[cursor..].is_empty() {
                 let (item, consumed) = parse_single_ead(&buffer[cursor..])?;
                 eads.items[count] = Some(item);
@@ -935,6 +936,7 @@ mod edhoc_parser {
         Ok(eads)
     }
 
+    #[hax_lib::ensures(|result| result.as_ref().map_or(true, |(_, consumed)| *consumed <= input.len()))]
     fn parse_single_ead(input: &[u8]) -> Result<(EADItem, usize), EDHOCError> {
         let mut decoder = CBORDecoder::new(input);
         let label = decoder
@@ -973,6 +975,7 @@ mod edhoc_parser {
         Ok((item, position))
     }
 
+    #[hax_lib::ensures(|result| result.as_ref().map_or(true, |(suites, _)| suites.len() <= MAX_SUITES_LEN))]
     pub fn parse_suites_i(
         mut decoder: CBORDecoder,
     ) -> Result<(EdhocBuffer<MAX_SUITES_LEN>, CBORDecoder), EDHOCError> {
