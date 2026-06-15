@@ -613,6 +613,7 @@ fn encode_plaintext_4(ead_4: &EadItems) -> Result<BufferPlaintext4, EDHOCError> 
     Ok(plaintext_4)
 }
 
+#[hax_lib::requires(th_3.len() == SHA256_DIGEST_LEN)]
 fn encode_enc_structure(th_3: &BytesHashLen) -> BytesEncStructureLen {
     let encrypt0 = b"Encrypt0";
 
@@ -669,6 +670,7 @@ fn compute_k_4_iv_4(
 }
 
 // calculates ciphertext_3 wrapped in a cbor byte string
+#[hax_lib::requires(plaintext_3.len() + AES_CCM_TAG_LEN + 2 <= MAX_MESSAGE_SIZE_LEN)]
 fn encrypt_message_3(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,
@@ -688,11 +690,7 @@ fn encrypt_message_3(
         output.push(bytestring_length as _).unwrap();
     };
 
-    // FIXME: Make the function fallible, especially with the prospect of algorithm agility
-    assert!(
-        output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN,
-        "Tried to encode a message that is too large."
-    );
+    hax_lib::assert!(output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN, "message too large");
 
     let enc_structure = encode_enc_structure(th_3);
 
@@ -754,6 +752,7 @@ fn decrypt_message_3(
     )
 }
 
+#[hax_lib::requires(plaintext_4.len() + AES_CCM_TAG_LEN + 2 <= MAX_MESSAGE_SIZE_LEN)]
 fn encrypt_message_4(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
