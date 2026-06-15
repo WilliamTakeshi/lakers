@@ -181,6 +181,7 @@ pub struct Credential {
     pub cred_type: CredentialType,
 }
 
+#[hax_lib::attributes]
 impl Credential {
     /// Creates a new CCS credential with the given bytes and public key
     pub fn new_ccs(bytes: BufferCred, public_key: BytesKeyEC2) -> Self {
@@ -312,7 +313,9 @@ impl Credential {
                     bytes: BufferCred::new_from_slice(value)
                         .map_err(|_| EDHOCError::ParsingError)?,
                     key: CredentialKey::Symmetric(symmetric_key),
-                    kid: Some(BufferKid::new_from_slice(&[kid]).unwrap()),
+                    kid: Some(
+                        BufferKid::new_from_slice(&[kid]).map_err(|_| EDHOCError::ParsingError)?,
+                    ),
                     cred_type: CredentialType::CCS_PSK,
                 })
             } else {
@@ -397,6 +400,7 @@ impl Credential {
     /// // This is true for all dressed naked COSE keys
     /// assert!(ccs.bytes.as_slice().starts_with(&hex!("a108a101")));
     /// ```
+    #[hax_lib::requires(cosekey.len() + 4 <= 192)]
     pub fn parse_and_dress_naked_cosekey(cosekey: &[u8]) -> Result<Self, EDHOCError> {
         let mut decoder = CBORDecoder::new(cosekey);
         let (key, kid) = Self::parse_cosekey(&mut decoder)?;
@@ -406,7 +410,7 @@ impl Credential {
         let mut bytes = BufferCred::new();
         bytes
             .extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01])
-            .expect("Minimal size fits in the buffer");
+            .map_err(|_| EDHOCError::CredentialTooLongError)?;
         bytes
             .extend_from_slice(cosekey)
             .map_err(|_| EDHOCError::CredentialTooLongError)?;
@@ -422,6 +426,7 @@ impl Credential {
     ///
     /// For example, if the credential is a CCS:
     ///   { /kccs/ 14: bytes }
+    #[hax_lib::requires(self.bytes.len() + 2 <= 192)]
     pub fn by_value(&self) -> Result<IdCred, EDHOCError> {
         match self.cred_type {
             CredentialType::CCS => {
@@ -433,7 +438,7 @@ impl Credential {
                 id_cred
                     .bytes
                     .extend_from_slice(self.bytes.as_slice())
-                    .unwrap();
+                    .map_err(|_| EDHOCError::CredentialTooLongError)?;
                 Ok(id_cred)
             }
             // if we could encode a message along the error below,
@@ -448,6 +453,7 @@ impl Credential {
     ///   { /kid/ 4: kid }
     ///
     /// TODO: accept a parameter to specify the type of reference, e.g. kid, x5t, etc.
+    #[hax_lib::requires(self.kid.as_ref().map_or(true, |k| k.len() + 3 <= 192))]
     pub fn by_kid(&self) -> Result<IdCred, EDHOCError> {
         let Some(kid) = self.kid.as_ref() else {
             return Err(EDHOCError::MissingIdentity);
@@ -461,7 +467,10 @@ impl Credential {
                 CBOR_MAJOR_BYTE_STRING | kid.len() as u8,
             ])
             .map_err(|_| EDHOCError::CredentialTooLongError)?;
-        id_cred.bytes.extend_from_slice(kid.as_slice()).unwrap();
+        id_cred
+            .bytes
+            .extend_from_slice(kid.as_slice())
+            .map_err(|_| EDHOCError::CredentialTooLongError)?;
         Ok(id_cred)
     }
 }
