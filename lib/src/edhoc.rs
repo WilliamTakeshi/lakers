@@ -474,6 +474,11 @@ fn encode_message_1(
     Ok(output)
 }
 
+#[hax_lib::requires(
+    ciphertext_2.len() <= MAX_MESSAGE_SIZE_LEN &&
+    P256_ELEM_LEN + ciphertext_2.len() <= u8::MAX.into()
+)]
+#[hax_lib::ensures(|result| result.len() == 2 + P256_ELEM_LEN + ciphertext_2.len())]
 fn encode_message_2(g_y: &BytesP256ElemLen, ciphertext_2: &BufferCiphertext2) -> BufferMessage2 {
     let mut output: BufferMessage2 = BufferMessage2::new();
 
