@@ -248,6 +248,7 @@ impl ConnIdType {
     }
 }
 
+#[hax_lib::attributes]
 impl ConnId {
     /// Construct a ConnId from the result of [`cbor_decoder::int_raw`], which is a
     /// byte that represents a single positive or negative CBOR integer encoded in the 5 bits minor
@@ -292,6 +293,7 @@ impl ConnId {
     }
 
     /// The bytes that form the identifier (an arbitrary byte string)
+    #[hax_lib::requires(self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_slice(&self) -> &[u8] {
         match self.classify() {
             ConnIdType::SingleByte => &self.0[..1],
@@ -317,6 +319,7 @@ impl ConnId {
     /// let c_i = ConnId::from_slice(&[0xff]).unwrap();
     /// assert_eq!(c_i.as_cbor(), &[0x41, 0xff]);
     /// ```
+    #[hax_lib::requires(self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_cbor(&self) -> &[u8] {
         &self.0[..self.classify().length()]
     }
@@ -352,6 +355,8 @@ impl ConnId {
                 // split_at_mut if not for hax.
                 let mut i = 0;
                 while i < input.len() {
+                    hax_lib::loop_decreases!(input.len() - i);
+                    hax_lib::loop_invariant!(i < input.len() && 1 + i < MAX_CONNID_ENCODED_LEN);
                     s[1 + i] = input[i];
                     i = i + 1;
                 }
