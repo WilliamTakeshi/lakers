@@ -15,7 +15,6 @@ pub use cbor_decoder::*;
 pub use edhoc_parser::*;
 pub use helpers::*;
 
-use core::num::NonZeroI16;
 use defmt_or_log::trace;
 
 mod crypto;
@@ -470,14 +469,14 @@ impl EDHOCError {
 
 /// Representation of an EDHOC ERR_CODE
 #[repr(C)]
-pub struct ErrCode(pub NonZeroI16);
+pub struct ErrCode(pub i16);
 
 impl ErrCode {
-    pub const UNSPECIFIED: Self = ErrCode(NonZeroI16::new(1).unwrap());
-    pub const WRONG_SELECTED_CIPHER_SUITE: Self = ErrCode(NonZeroI16::new(2).unwrap());
-    pub const UNKNOWN_CREDENTIAL: Self = ErrCode(NonZeroI16::new(3).unwrap());
+    pub const UNSPECIFIED: Self = ErrCode(1);
+    pub const WRONG_SELECTED_CIPHER_SUITE: Self = ErrCode(2);
+    pub const UNKNOWN_CREDENTIAL: Self = ErrCode(3);
     // Code requested in https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz
-    pub const ACCESS_DENIED: Self = ErrCode(NonZeroI16::new(3333).unwrap());
+    pub const ACCESS_DENIED: Self = ErrCode(3333);
 }
 
 #[derive(Debug)]
