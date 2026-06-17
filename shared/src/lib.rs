@@ -26,6 +26,16 @@ pub use cred::*;
 mod buffer;
 pub use buffer::*;
 
+mod error;
+#[allow(deprecated)]
+pub use error::KCSS_LABEL;
+pub use error::{
+    EDHOCError, ErrCode, CBOR_MAJOR_ARRAY, CBOR_MAJOR_ARRAY_MAX, CBOR_MAJOR_BYTE_STRING,
+    CBOR_MAJOR_BYTE_STRING_MAX, CBOR_MAJOR_MAP, CBOR_MAJOR_TEXT_STRING, CBOR_NEG_INT_1BYTE_END,
+    CBOR_NEG_INT_1BYTE_START, CBOR_UINT_1BYTE_END, CBOR_UINT_1BYTE_START, KCCS_LABEL, KID_LABEL,
+};
+use error::{CBOR_MAJOR_FLOATSIMPLE, CBOR_MAJOR_NEGATIVE, CBOR_MAJOR_TAG, CBOR_MAJOR_UNSIGNED};
+
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
 #[cfg(feature = "python-bindings")]
@@ -97,29 +107,10 @@ pub const MAX_BUFFER_LEN: usize = if cfg!(feature = "max_buffer_len_1024") {
 pub const CBOR_BYTE_STRING: u8 = 0x58u8;
 pub const CBOR_TEXT_STRING: u8 = 0x78u8;
 pub const CBOR_UINT_1BYTE: u8 = 0x18u8;
-pub const CBOR_NEG_INT_1BYTE_START: u8 = 0x20u8;
-pub const CBOR_NEG_INT_1BYTE_END: u8 = 0x37u8;
-pub const CBOR_UINT_1BYTE_START: u8 = 0x0u8;
-pub const CBOR_UINT_1BYTE_END: u8 = 0x17u8;
-const CBOR_MAJOR_UNSIGNED: u8 = 0 << 5;
-const CBOR_MAJOR_NEGATIVE: u8 = 1 << 5;
-const CBOR_MAJOR_TAG: u8 = 6 << 5;
-const CBOR_MAJOR_FLOATSIMPLE: u8 = 7 << 5;
-pub const CBOR_MAJOR_TEXT_STRING: u8 = 0x60u8;
-pub const CBOR_MAJOR_BYTE_STRING: u8 = 0x40u8;
-pub const CBOR_MAJOR_BYTE_STRING_MAX: u8 = 0x57u8;
-pub const CBOR_MAJOR_ARRAY: u8 = 0x80u8;
-pub const CBOR_MAJOR_ARRAY_MAX: u8 = 0x97u8;
-pub const CBOR_MAJOR_MAP: u8 = 0xA0;
 pub const MAX_INFO_LEN: usize = 2 + SHA256_DIGEST_LEN + // 32-byte digest as bstr
 				            1 + MAX_KDF_LABEL_LEN +     // label <24 bytes as tstr
 						    1 + MAX_KDF_CONTEXT_LEN +   // context <24 bytes as bstr
 						    1; // length as u8
-
-pub const KCCS_LABEL: u8 = 14;
-#[deprecated(note = "Typo for KCCS_LABEL")]
-pub const KCSS_LABEL: u8 = KCCS_LABEL;
-pub const KID_LABEL: u8 = 4;
 
 pub const ENC_STRUCTURE_LEN: usize = 8 + 5 + SHA256_DIGEST_LEN; // 8 for ENCRYPT0
 
@@ -402,81 +393,6 @@ impl From<EDHOCSuite> for u8 {
     fn from(suite: EDHOCSuite) -> u8 {
         suite as u8
     }
-}
-
-#[derive(PartialEq, Debug)]
-#[non_exhaustive]
-pub enum EDHOCError {
-    /// In an exchange, a credential was set as "expected", but the credential configured by the
-    /// peer did not match what was presented. This is more an application internal than an EDHOC
-    /// error: When the application sets the expected credential, that process should be informed
-    /// by the known details.
-    UnexpectedCredential,
-    MissingIdentity,
-    IdentityAlreadySet,
-    MacVerificationFailed,
-    UnsupportedMethod,
-    UnsupportedCipherSuite,
-    ParsingError,
-    EncodingError,
-    CredentialTooLongError,
-    EadLabelTooLongError,
-    EadTooLongError,
-    /// An EAD was received that was either not known (and critical), or not understood, or
-    /// otherwise erroneous.
-    EADUnprocessable,
-    /// The credential or EADs could be processed (possibly by a third party), but the decision
-    /// based on that was to not to continue the EDHOC session.
-    ///
-    /// See also
-    /// <https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz#name-edhoc-error-access-denied>
-    AccessDenied,
-}
-
-impl EDHOCError {
-    /// The ERR_CODE corresponding to the error
-    ///
-    /// Errors that refer to internal limitations (such as EadTooLongError) are treated the same
-    /// way as parsing errors, and return an unspecified error: Those are equivalent to limitations
-    /// of the parser, and a constrained system can not be expected to differentiate between "the
-    /// standard allows this but my number space is too small" and "this violates the standard".
-    ///
-    /// If an EDHOCError is returned through EDHOC, it will use this in its EDHOC error message.
-    ///
-    /// Note that this on its own is insufficient to create an error message: Additional ERR_INFO
-    /// is needed, which may or may not be available with the EDHOCError alone.
-    ///
-    /// TODO: Evolve the EDHOCError type such that all information needed is available.
-    pub fn err_code(&self) -> ErrCode {
-        use EDHOCError::*;
-        match self {
-            UnexpectedCredential => ErrCode::UNSPECIFIED,
-            MissingIdentity => ErrCode::UNSPECIFIED,
-            IdentityAlreadySet => ErrCode::UNSPECIFIED,
-            MacVerificationFailed => ErrCode::UNSPECIFIED,
-            UnsupportedMethod => ErrCode::UNSPECIFIED,
-            UnsupportedCipherSuite => ErrCode::WRONG_SELECTED_CIPHER_SUITE,
-            ParsingError => ErrCode::UNSPECIFIED,
-            EncodingError => ErrCode::UNSPECIFIED,
-            CredentialTooLongError => ErrCode::UNSPECIFIED,
-            EadLabelTooLongError => ErrCode::UNSPECIFIED,
-            EadTooLongError => ErrCode::UNSPECIFIED,
-            EADUnprocessable => ErrCode::UNSPECIFIED,
-            AccessDenied => ErrCode::ACCESS_DENIED,
-        }
-    }
-}
-
-/// Representation of an EDHOC ERR_CODE
-#[repr(C)]
-pub struct ErrCode(pub i16);
-
-impl ErrCode {
-    pub const UNSPECIFIED: Self = ErrCode(1);
-    pub const WRONG_SELECTED_CIPHER_SUITE: Self = ErrCode(2);
-    pub const UNKNOWN_CREDENTIAL: Self = ErrCode(3);
-    // Code requested in https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz
-    pub const ACCESS_DENIED: Self = ErrCode(3333);
 }
 
 #[derive(Debug)]
@@ -1253,8 +1169,7 @@ mod cbor_decoder {
         /// Decode a `u8` value.
         pub fn u8(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            // NOTE: thid could be a `match` with `n @ 0x00..=0x17` clauses but hax doesn't support it
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n)
             } else if 0x18 == n {
                 self.read()
@@ -1266,9 +1181,9 @@ mod cbor_decoder {
         /// Decode an `i8` value.
         pub fn i8(&mut self) -> Result<i8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n as i8)
-            } else if (0x20..=0x37).contains(&n) {
+            } else if n >= 0x20 && n <= 0x37 {
                 Ok(-1 - (n - 0x20) as i8)
             } else if 0x18 == n {
                 Ok(self.read()? as i8)
@@ -1320,7 +1235,7 @@ mod cbor_decoder {
         /// Get the raw `i8` or `u8` value.
         pub fn int_raw(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) || (0x20..=0x37).contains(&n) {
+            if n <= 0x17 || (n >= 0x20 && n <= 0x37) {
                 Ok(n)
             } else {
                 Err(CBORError::DecodingError)
@@ -1387,7 +1302,7 @@ mod cbor_decoder {
 
         /// Decode a `u8` value into usize.
         pub fn as_usize(&mut self, b: u8) -> Result<usize, CBORError> {
-            if (0..=0x17).contains(&b) {
+            if b <= 0x17 {
                 Ok(usize::from(b))
             } else if 0x18 == b {
                 self.read().map(usize::from)
