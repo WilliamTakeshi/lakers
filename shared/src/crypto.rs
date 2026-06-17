@@ -102,6 +102,7 @@ impl CcmTagLen for CcmTagLen16 {
     const LEN: usize = 16;
 }
 
+#[cfg(not(hax))] // test-only code
 pub mod test_helper {
     use super::*;
 
