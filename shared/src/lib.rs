@@ -264,7 +264,7 @@ impl ConnId {
     }
 
     /// The bytes that form the identifier (an arbitrary byte string)
-    #[hax_lib::requires(self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_slice(&self) -> &[u8] {
         match self.classify() {
             ConnIdType::SingleByte => &self.0[..1],
@@ -290,7 +290,7 @@ impl ConnId {
     /// let c_i = ConnId::from_slice(&[0xff]).unwrap();
     /// assert_eq!(c_i.as_cbor(), &[0x41, 0xff]);
     /// ```
-    #[hax_lib::requires(self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_cbor(&self) -> &[u8] {
         &self.0[..self.classify().length()]
     }
@@ -327,7 +327,10 @@ impl ConnId {
                 let mut i = 0;
                 while i < input.len() {
                     hax_lib::loop_decreases!(input.len() - i);
-                    hax_lib::loop_invariant!(i < input.len() && 1 + i < MAX_CONNID_ENCODED_LEN);
+                    // i <= input.len() lets F* prove loop_decreases! doesn't underflow;
+                    // i < MAX_CONNID_ENCODED_LEN combined with i < input.len() <= MAX-1
+                    // lets F* prove 1+i < MAX_CONNID_ENCODED_LEN for s[1+i].
+                    hax_lib::loop_invariant!(i <= input.len() && i < MAX_CONNID_ENCODED_LEN);
                     s[1 + i] = input[i];
                     i = i + 1;
                 }
