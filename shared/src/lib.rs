@@ -1188,7 +1188,13 @@ mod cbor_decoder {
             } else if 0x18 == n {
                 Ok(self.read()? as i8)
             } else if 0x38 == n {
-                Ok(-1 - (self.read()? - 0x20) as i8)
+                let b = self.read()?;
+                // -1 - b fits in i8 only when b <= 127 (result -128..-1)
+                if b <= 127 {
+                    Ok(-1 - b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else {
                 Err(CBORError::DecodingError)
             }
