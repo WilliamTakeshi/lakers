@@ -27,6 +27,8 @@ mod buffer;
 pub use buffer::*;
 
 mod consts;
+#[allow(deprecated)]
+pub use consts::KCSS_LABEL;
 pub use consts::{
     CBOR_BYTE_STRING, CBOR_MAJOR_ARRAY, CBOR_MAJOR_ARRAY_MAX, CBOR_MAJOR_BYTE_STRING,
     CBOR_MAJOR_BYTE_STRING_MAX, CBOR_MAJOR_MAP, CBOR_MAJOR_TEXT_STRING, CBOR_NEG_INT_1BYTE_END,
@@ -34,8 +36,6 @@ pub use consts::{
     CBOR_UINT_1BYTE_START, KCCS_LABEL, KID_LABEL, MAX_INFO_LEN, MAX_KDF_CONTEXT_LEN,
     MAX_KDF_LABEL_LEN, SHA256_DIGEST_LEN,
 };
-#[allow(deprecated)]
-pub use consts::KCSS_LABEL;
 use consts::{CBOR_MAJOR_FLOATSIMPLE, CBOR_MAJOR_NEGATIVE, CBOR_MAJOR_TAG, CBOR_MAJOR_UNSIGNED};
 
 mod error;
@@ -211,7 +211,7 @@ impl ConnIdType {
     fn length(&self) -> usize {
         match self {
             ConnIdType::SingleByte => 1,
-            ConnIdType::ByteString(n) => (1 + n).into(),
+            ConnIdType::ByteString(n) => 1 + *n as usize,
         }
     }
 }
@@ -722,7 +722,10 @@ impl<'a> IntoIterator for &'a EadItems {
     type Item = &'a EADItem;
     type IntoIter = EadItemsIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        EadItemsIter { items: &self.items, pos: 0 }
+        EadItemsIter {
+            items: &self.items,
+            pos: 0,
+        }
     }
 }
 
