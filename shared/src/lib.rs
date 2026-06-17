@@ -1105,6 +1105,7 @@ mod cbor_decoder {
         pos: usize,
     }
 
+    #[hax_lib::attributes]
     impl<'a> CBORDecoder<'a> {
         pub fn new(bytes: &'a [u8]) -> Self {
             CBORDecoder { buf: bytes, pos: 0 }
@@ -1323,8 +1324,9 @@ mod cbor_decoder {
         }
 
         /// Get the additionl type info of the given byte (lowest 5 bits).
+        #[hax_lib::ensures(|result| result <= 31)]
         pub fn info_of(b: u8) -> u8 {
-            b & 0b000_11111
+            b % 32
         }
 
         /// Check for: an unsigned integer encoded as a single byte
