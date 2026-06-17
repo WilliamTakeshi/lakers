@@ -1205,9 +1205,11 @@ mod cbor_decoder {
         pub fn i32_limited(&mut self) -> Result<i32, CBORError> {
             let (major, argument) = self.read_major_argument16()?;
             match major {
-                CBOR_MAJOR_UNSIGNED => Ok(i32::from(argument)),
-                // Can not underflow
-                CBOR_MAJOR_NEGATIVE => Ok(-1 - i32::from(argument)),
+                // u16 always fits in i32
+                CBOR_MAJOR_UNSIGNED => Ok(argument as i32),
+                // argument as i32 is in 0..=65535, so -1 - argument is in -65536..=-1,
+                // so the subtraction never underflows for i32
+                CBOR_MAJOR_NEGATIVE => Ok(-1 - argument as i32),
                 _ => Err(CBORError::DecodingError),
             }
         }
