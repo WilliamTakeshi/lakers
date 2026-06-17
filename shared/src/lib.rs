@@ -699,16 +699,30 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
+pub struct EadItemsIter<'a> {
+    items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
+    pos: usize,
+}
+
+impl<'a> Iterator for EadItemsIter<'a> {
+    type Item = &'a EADItem;
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.pos < MAX_EAD_ITEMS {
+            let i = self.pos;
+            self.pos += 1;
+            if let Some(ref item) = self.items[i] {
+                return Some(item);
+            }
+        }
+        None
+    }
+}
+
 impl<'a> IntoIterator for &'a EadItems {
     type Item = &'a EADItem;
-
-    type IntoIter = core::iter::FilterMap<
-        core::slice::Iter<'a, Option<EADItem>>,
-        fn(&Option<EADItem>) -> Option<&EADItem>,
-    >;
-
+    type IntoIter = EadItemsIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter().filter_map(Option::as_ref)
+        EadItemsIter { items: &self.items, pos: 0 }
     }
 }
 
@@ -739,8 +753,12 @@ impl EadItems {
     ///
     /// Call this whenever processing EAD items after all processable items have been removed.
     pub fn processed_critical_items(&self) -> Result<(), EDHOCError> {
-        if self.iter().any(|i| i.is_critical) {
-            return Err(EDHOCError::EADUnprocessable);
+        for i in 0..MAX_EAD_ITEMS {
+            if let Some(item) = &self.items[i] {
+                if item.is_critical {
+                    return Err(EDHOCError::EADUnprocessable);
+                }
+            }
         }
         Ok(())
     }
@@ -758,7 +776,13 @@ impl EadItems {
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
     // of tests that's not a meanginful question.
     pub fn len(&self) -> usize {
-        self.items.iter().filter(|x| x.is_some()).count()
+        let mut count = 0;
+        for i in 0..MAX_EAD_ITEMS {
+            if self.items[i].is_some() {
+                count += 1;
+            }
+        }
+        count
     }
 
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
@@ -771,11 +795,13 @@ impl EadItems {
     ///
     /// If this errs, some EADs may already have been encoded.
     pub fn encode<const N: usize>(&self, output: &mut EdhocBuffer<N>) -> Result<(), EDHOCError> {
-        for ead_item in self {
-            let encoded = ead_item.encode()?;
-            output
-                .extend_from_slice(encoded.as_slice())
-                .map_err(|_| EDHOCError::EadTooLongError)?;
+        for i in 0..MAX_EAD_ITEMS {
+            if let Some(ead_item) = &self.items[i] {
+                let encoded = ead_item.encode()?;
+                output
+                    .extend_from_slice(encoded.as_slice())
+                    .map_err(|_| EDHOCError::EadTooLongError)?;
+            }
         }
         Ok(())
     }
