@@ -1394,7 +1394,9 @@ mod cbor_decoder {
                 }
             }
 
-            Ok(&self.buf[start..self.position()])
+            self.buf
+                .get(start..self.position())
+                .ok_or(CBORError::DecodingError)
         }
     }
 }
