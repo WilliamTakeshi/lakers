@@ -1,8 +1,12 @@
 use super::*;
 
-pub type BufferCred = EdhocBuffer<192>; // arbitrary size
-pub type BufferKid = EdhocBuffer<16>; // variable size, up to 16 bytes
-pub type BufferIdCred = EdhocBuffer<192>; // variable size, can contain either the contents of a BufferCred or a BufferKid
+const BUFFER_CRED_LEN: usize = 192; // arbitrary size
+const BUFFER_ID_CRED_LEN: usize = 192; // variable size, can contain either the contents of a BufferCred or a BufferKid
+const BUFFER_KID_LEN: usize = 16;
+
+pub type BufferCred = EdhocBuffer<BUFFER_CRED_LEN>;
+pub type BufferKid = EdhocBuffer<BUFFER_KID_LEN>;
+pub type BufferIdCred = EdhocBuffer<BUFFER_ID_CRED_LEN>;
 pub type BytesKeyAES128 = [u8; 16];
 pub type BytesKeyEC2 = [u8; 32];
 
@@ -61,6 +65,7 @@ pub struct IdCred {
     pub bytes: BufferIdCred, // variable size, can contain either the contents of a BufferCred or a BufferKid
 }
 
+#[hax_lib::attributes]
 impl IdCred {
     pub fn new() -> Self {
         Self {
@@ -116,6 +121,7 @@ impl IdCred {
     /// View the full value of the ID_CRED_x: the CBOR encoding of a 1-element CBOR map
     ///
     /// This is the value that is used when ID_CRED_x has no impact on message size, see RFC 9528 Section 3.5.3.2.
+    #[hax_lib::requires(self.bytes.len() <= BUFFER_ID_CRED_LEN)]
     pub fn as_full_value(&self) -> &[u8] {
         self.bytes.as_slice()
     }
@@ -125,6 +131,7 @@ impl IdCred {
     /// Note that this is NOT doing CBOR encoding, it is rather performing (when applicable)
     /// the compact encoding of ID_CRED fields.
     /// This style of encoding is used when ID_CRED_x has an impact on message size.
+    #[hax_lib::requires(self.bytes.len() <= BUFFER_ID_CRED_LEN)]
     pub fn as_encoded_value(&self) -> &[u8] {
         // This would be idiomatic as a match statement.
         // Workaround-For: https://github.com/hacspec/hax/issues/804
@@ -141,14 +148,17 @@ impl IdCred {
         }
     }
 
+    #[hax_lib::requires(self.bytes.len() >= 2 && self.bytes.len() <= BUFFER_ID_CRED_LEN)]
     pub fn reference_only(&self) -> Result<bool, EDHOCError> {
         Ok(self.item_type()? == IdCredType::KID)
     }
 
+    #[hax_lib::requires(self.bytes.len() >= 2 && self.bytes.len() <= BUFFER_ID_CRED_LEN)]
     pub fn item_type(&self) -> Result<IdCredType, EDHOCError> {
-        self.bytes.as_slice()[1].try_into()
+        self.bytes[1].try_into()
     }
 
+    #[hax_lib::requires(self.bytes.len() >= 2 && self.bytes.len() <= BUFFER_ID_CRED_LEN)]
     pub fn get_ccs(&self) -> Option<Credential> {
         if self.item_type() == Ok(IdCredType::KCCS) {
             Credential::parse_ccs(&self.bytes.as_slice()[2..]).ok()
@@ -400,7 +410,7 @@ impl Credential {
     /// // This is true for all dressed naked COSE keys
     /// assert!(ccs.bytes.as_slice().starts_with(&hex!("a108a101")));
     /// ```
-    #[hax_lib::requires(cosekey.len() + 4 <= 192)]
+    #[hax_lib::requires(cosekey.len() <= BUFFER_CRED_LEN - 4)]
     pub fn parse_and_dress_naked_cosekey(cosekey: &[u8]) -> Result<Self, EDHOCError> {
         let mut decoder = CBORDecoder::new(cosekey);
         let (key, kid) = Self::parse_cosekey(&mut decoder)?;
@@ -426,7 +436,7 @@ impl Credential {
     ///
     /// For example, if the credential is a CCS:
     ///   { /kccs/ 14: bytes }
-    #[hax_lib::requires(self.bytes.len() + 2 <= 192)]
+    #[hax_lib::requires(self.bytes.len() <= BUFFER_CRED_LEN && self.bytes.len() <= BUFFER_ID_CRED_LEN - 2)]
     pub fn by_value(&self) -> Result<IdCred, EDHOCError> {
         match self.cred_type {
             CredentialType::CCS => {
@@ -453,7 +463,7 @@ impl Credential {
     ///   { /kid/ 4: kid }
     ///
     /// TODO: accept a parameter to specify the type of reference, e.g. kid, x5t, etc.
-    #[hax_lib::requires(self.kid.as_ref().map_or(true, |k| k.len() + 3 <= 192))]
+    #[hax_lib::requires(self.kid.as_ref().map_or(true, |k| k.len() <= BUFFER_KID_LEN && k.len() <= BUFFER_ID_CRED_LEN - 3))]
     pub fn by_kid(&self) -> Result<IdCred, EDHOCError> {
         let Some(kid) = self.kid.as_ref() else {
             return Err(EDHOCError::MissingIdentity);
