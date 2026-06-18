@@ -1312,8 +1312,8 @@ mod cbor_decoder {
             let value = match info {
                 // Workaround-For: https://github.com/cryspen/hax/issues/925
                 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
-                | 18 | 19 | 20 | 21 | 22 | 23 => info.into(),
-                24 => self.read()?.into(),
+                | 18 | 19 | 20 | 21 | 22 | 23 => info as u16,
+                24 => self.read()? as u16,
                 25 => u16::from_be_bytes([self.read()?, self.read()?]),
                 // We do not support those in this function.
                 26 | 27 => return Err(CBORError::DecodingError),
@@ -1399,9 +1399,9 @@ mod cbor_decoder {
         /// Decode a `u8` value into usize.
         pub fn as_usize(&mut self, b: u8) -> Result<usize, CBORError> {
             if b <= 0x17 {
-                Ok(usize::from(b))
+                Ok(b as usize)
             } else if 0x18 == b {
-                self.read().map(usize::from)
+                Ok(self.read()? as usize)
             } else {
                 Err(CBORError::DecodingError)
             }
@@ -1463,7 +1463,7 @@ mod cbor_decoder {
                                 .ok_or(CBORError::DecodingError)?;
                         }
                         CBOR_MAJOR_BYTE_STRING | CBOR_MAJOR_TEXT_STRING => {
-                            self.read_slice(argument.into())?;
+                            self.read_slice(argument as usize)?;
                         }
                         CBOR_MAJOR_ARRAY => {
                             remaining_items = remaining_items
