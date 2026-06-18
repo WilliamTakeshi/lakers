@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use digest::Digest;
 use lakers_shared::{Crypto as CryptoTrait, *};
 
@@ -522,6 +523,7 @@ fn compute_th_2(
     crypto.sha256_digest(message.as_slice())
 }
 
+#[allow(unused_variables)]
 fn compute_th_3(
     crypto: &mut impl CryptoTrait,
     th_2: &BytesHashLen,
@@ -540,11 +542,11 @@ fn compute_th_3(
     // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
     #[cfg(hax)]
     {
-        #![allow(unused_variables)]
         [0u8; SHA256_DIGEST_LEN]
     }
 }
 
+#[allow(unused_variables)]
 fn compute_th_4(
     crypto: &mut impl CryptoTrait,
     th_3: &BytesHashLen,
@@ -563,7 +565,6 @@ fn compute_th_4(
     // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
     #[cfg(hax)]
     {
-        #![allow(unused_variables)]
         [0u8; SHA256_DIGEST_LEN]
     }
 }
