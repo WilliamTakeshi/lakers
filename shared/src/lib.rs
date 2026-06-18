@@ -715,6 +715,7 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
+#[cfg(not(hax))]
 pub struct EadItemsIter<'a> {
     items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
     pos: usize,
