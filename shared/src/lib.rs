@@ -876,15 +876,30 @@ mod edhoc_parser {
         let mut count = 0;
         let mut cursor = 0;
         let mut eads = EadItems::new();
+        let mut i = 0;
+        // Accumulate parse errors without `?` so the loop has no early return, which forces
+        // hax to generate `while_loop` (not `while_loop_return`). Only `while_loop` passes the
+        // invariant to the body, which is needed to prove `cursor <= buffer.len()`.
+        let mut parse_error: Option<EDHOCError> = None;
 
-        for _i in 0..MAX_EAD_ITEMS {
-            hax_lib::loop_invariant!(count <= _i && cursor <= buffer.len());
+        while i < MAX_EAD_ITEMS && parse_error.is_none() {
+            hax_lib::loop_decreases!(MAX_EAD_ITEMS - i);
+            hax_lib::loop_invariant!(count <= i && i <= MAX_EAD_ITEMS && cursor <= buffer.len());
             if !buffer[cursor..].is_empty() {
-                let (item, consumed) = parse_single_ead(&buffer[cursor..])?;
-                eads.items[count] = Some(item);
-                count += 1;
-                cursor += consumed;
+                match parse_single_ead(&buffer[cursor..]) {
+                    Ok((item, consumed)) => {
+                        eads.items[count] = Some(item);
+                        count += 1;
+                        cursor += consumed;
+                    }
+                    Err(e) => parse_error = Some(e),
+                }
             }
+            i += 1;
+        }
+
+        if let Some(e) = parse_error {
+            return Err(e);
         }
 
         Ok(eads)
@@ -898,7 +913,16 @@ mod edhoc_parser {
             .map_err(|_| EDHOCError::ParsingError)?;
 
         let is_critical = label < 0;
-        let label = label.abs();
+        // Avoid .abs(): it panics on i32::MIN. i32_limited() only returns values in
+        // [-65536, 65535] so i32::MIN is unreachable, but F* can't prove that without
+        // annotating i32_limited's ensures. The explicit guard makes the safe path clear.
+        let label = if label >= 0 {
+            label
+        } else if label > i32::MIN {
+            -label // label in (-2^31, 0), so -label in (0, 2^31-1]: fits in i32
+        } else {
+            return Err(EDHOCError::ParsingError);
+        };
 
         let position_after_label = decoder.position();
         let (ead_value, position) = if let Ok(_slice) = decoder.bytes() {
@@ -916,12 +940,15 @@ mod edhoc_parser {
             (EdhocBuffer::new(), position_after_label)
         };
 
+        // TryInto<u16> for i32 has no F* model in hax's proof-libs; use an explicit range check
+        // instead. The guard ensures label is in [0, 65535], so `label as u16` is a lossless
+        // truncation: the i32 value fits exactly in the u16 bit pattern with no sign extension
+        // or wraparound.
+        if label < 0 || label > u16::MAX as i32 {
+            return Err(EDHOCError::ParsingError);
+        }
         let item = EADItem {
-            label: label
-                .try_into()
-                // That's really only for 0xffff; we could accommodate that if we handled padding
-                // differently and stored the (positive label-1) value
-                .map_err(|_| EDHOCError::ParsingError)?,
+            label: label as u16,
             is_critical,
             value: ead_value,
         };
@@ -937,21 +964,35 @@ mod edhoc_parser {
         let mut suites_i: EdhocBuffer<MAX_SUITES_LEN> = Default::default();
         if let Ok(curr) = decoder.current() {
             if CBOR_UINT_1BYTE_START == CBORDecoder::type_of(curr) {
-                let Ok(_) = suites_i.push(decoder.u8()?) else {
-                    return Err(EDHOCError::ParsingError);
-                };
+                match suites_i.push(decoder.u8()?) {
+                    Ok(_) => {}
+                    Err(_) => return Err(EDHOCError::ParsingError),
+                }
                 Ok((suites_i, decoder))
             } else if CBOR_MAJOR_ARRAY == CBORDecoder::type_of(curr)
                 && CBORDecoder::info_of(curr) >= 2
             {
                 // NOTE: arrays must be at least 2 items long, otherwise the compact encoding (int) must be used
                 let received_suites_i_len = decoder.array()?;
-                let write_range = suites_i
-                    .extend_reserve(received_suites_i_len)
-                    .or(Err(EDHOCError::ParsingError))?;
-                #[allow(deprecated, reason = "hax complains about mutable references in loops")]
-                for i in write_range {
-                    suites_i.content[i] = decoder.u8()?;
+                let write_range = match suites_i.extend_reserve(received_suites_i_len) {
+                    Ok(r) => r,
+                    Err(_) => return Err(EDHOCError::ParsingError),
+                };
+                let end = write_range.end;
+                let mut i = write_range.start;
+                let mut parse_error: Option<EDHOCError> = None;
+                #[allow(deprecated)]
+                while i < end && parse_error.is_none() {
+                    hax_lib::loop_decreases!(end - i);
+                    hax_lib::loop_invariant!(i <= end && end <= MAX_SUITES_LEN && suites_i.len() <= MAX_SUITES_LEN);
+                    match decoder.u8() {
+                        Ok(byte) => { suites_i.content[i] = byte; }
+                        Err(_) => { parse_error = Some(EDHOCError::ParsingError); }
+                    }
+                    i += 1;
+                }
+                if let Some(e) = parse_error {
+                    return Err(e);
                 }
                 Ok((suites_i, decoder))
             } else {
@@ -962,6 +1003,7 @@ mod edhoc_parser {
         }
     }
 
+    #[hax_lib::requires(rcvd_message_1.len() <= MAX_MESSAGE_SIZE_LEN)]
     pub fn parse_message_1(
         rcvd_message_1: &BufferMessage1,
     ) -> Result<
@@ -1003,6 +1045,7 @@ mod edhoc_parser {
         }
     }
 
+    #[hax_lib::requires(rcvd_message_2.len() <= MAX_MESSAGE_SIZE_LEN)]
     pub fn parse_message_2(
         rcvd_message_2: &BufferMessage2,
     ) -> Result<(BytesP256ElemLen, BufferCiphertext2), EDHOCError> {
@@ -1035,6 +1078,7 @@ mod edhoc_parser {
         }
     }
 
+    #[hax_lib::requires(plaintext_2.len() <= MAX_MESSAGE_SIZE_LEN)]
     pub fn decode_plaintext_2(
         plaintext_2: &BufferCiphertext2,
     ) -> Result<(ConnId, IdCred, BytesMac2, EadItems), EDHOCError> {
@@ -1065,6 +1109,7 @@ mod edhoc_parser {
         }
     }
 
+    #[hax_lib::requires(plaintext_3.len() <= MAX_MESSAGE_SIZE_LEN)]
     pub fn decode_plaintext_3(
         plaintext_3: &BufferPlaintext3,
     ) -> Result<(IdCred, BytesMac3, EadItems), EDHOCError> {
@@ -1093,6 +1138,7 @@ mod edhoc_parser {
         }
     }
 
+    #[hax_lib::requires(plaintext_4.len() <= MAX_MESSAGE_SIZE_LEN)]
     pub fn decode_plaintext_4(plaintext_4: &BufferPlaintext4) -> Result<EadItems, EDHOCError> {
         trace!("Enter decode_plaintext_4");
         let decoder = CBORDecoder::new(plaintext_4.as_slice());
