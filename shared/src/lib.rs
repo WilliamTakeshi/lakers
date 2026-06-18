@@ -715,7 +715,7 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
-#[cfg(not(hax))]
+#[allow(dead_code)] // fields are only read inside #[cfg(not(hax))] Iterator impl
 pub struct EadItemsIter<'a> {
     items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
     pos: usize,

@@ -528,15 +528,21 @@ fn compute_th_3(
     plaintext_2: &BufferPlaintext2,
     cred_r: &[u8],
 ) -> BytesHashLen {
-    let mut hash = crypto.sha256_start();
-
-    hash.update([CBOR_BYTE_STRING, th_2.len() as u8]);
-    hash.update(th_2);
-
-    hash.update(plaintext_2.as_slice());
-    hash.update(cred_r);
-
-    hash.finalize().into()
+    #[cfg(not(hax))]
+    {
+        let mut hash = crypto.sha256_start();
+        hash.update([CBOR_BYTE_STRING, th_2.len() as u8]);
+        hash.update(th_2);
+        hash.update(plaintext_2.as_slice());
+        hash.update(cred_r);
+        hash.finalize().into()
+    }
+    // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
+    #[cfg(hax)]
+    {
+        #![allow(unused_variables)]
+        [0u8; SHA256_DIGEST_LEN]
+    }
 }
 
 fn compute_th_4(
@@ -545,14 +551,21 @@ fn compute_th_4(
     plaintext_3: &BufferPlaintext3,
     cred_i: &[u8],
 ) -> BytesHashLen {
-    let mut hash = crypto.sha256_start();
-
-    hash.update([CBOR_BYTE_STRING, th_3.len() as u8]);
-    hash.update(th_3);
-    hash.update(plaintext_3.as_slice());
-    hash.update(cred_i);
-
-    hash.finalize().into()
+    #[cfg(not(hax))]
+    {
+        let mut hash = crypto.sha256_start();
+        hash.update([CBOR_BYTE_STRING, th_3.len() as u8]);
+        hash.update(th_3);
+        hash.update(plaintext_3.as_slice());
+        hash.update(cred_i);
+        hash.finalize().into()
+    }
+    // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
+    #[cfg(hax)]
+    {
+        #![allow(unused_variables)]
+        [0u8; SHA256_DIGEST_LEN]
+    }
 }
 
 // TODO: consider moving this to a new 'edhoc crypto primitives' module
