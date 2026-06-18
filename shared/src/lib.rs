@@ -984,10 +984,16 @@ mod edhoc_parser {
                 #[allow(deprecated)]
                 while i < end && parse_error.is_none() {
                     hax_lib::loop_decreases!(end - i);
-                    hax_lib::loop_invariant!(i <= end && end <= MAX_SUITES_LEN && suites_i.len() <= MAX_SUITES_LEN);
+                    hax_lib::loop_invariant!(
+                        i <= end && end <= MAX_SUITES_LEN && suites_i.len() <= MAX_SUITES_LEN
+                    );
                     match decoder.u8() {
-                        Ok(byte) => { suites_i.content[i] = byte; }
-                        Err(_) => { parse_error = Some(EDHOCError::ParsingError); }
+                        Ok(byte) => {
+                            suites_i.content[i] = byte;
+                        }
+                        Err(_) => {
+                            parse_error = Some(EDHOCError::ParsingError);
+                        }
                     }
                     i += 1;
                 }

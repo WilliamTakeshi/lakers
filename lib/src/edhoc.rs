@@ -694,7 +694,10 @@ fn encrypt_message_3(
         output.push(bytestring_length as _).unwrap();
     };
 
-    hax_lib::assert!(output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN, "message too large");
+    hax_lib::assert!(
+        output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN,
+        "message too large"
+    );
 
     let enc_structure = encode_enc_structure(th_3);
 
