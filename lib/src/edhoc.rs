@@ -1,6 +1,8 @@
+#[allow(unused_imports)]
 use digest::Digest;
 use lakers_shared::{Crypto as CryptoTrait, *};
 
+#[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN && result.len() < 256)]
 pub fn edhoc_exporter(
     state: &Completed,
     crypto: &mut impl CryptoTrait,
@@ -11,6 +13,7 @@ pub fn edhoc_exporter(
     edhoc_kdf(crypto, &state.prk_exporter, label, context, result);
 }
 
+#[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN)]
 pub fn edhoc_key_update(
     state: &mut Completed,
     crypto: &mut impl CryptoTrait,
@@ -39,7 +42,8 @@ pub fn r_process_message_1(
         match method {
             EDHOCMethod::StatStat => {
                 // Step 2: verify that the selected cipher suite is supported
-                if suites_i[suites_i.len() - 1] == EDHOC_SUPPORTED_SUITES[0] {
+                let last_suite = *suites_i.as_slice().last().ok_or(EDHOCError::ParsingError)?;
+                if last_suite == EDHOC_SUPPORTED_SUITES[0] {
                     // hash message_1 and save the hash to the state to avoid saving the whole message
                     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
                     Ok((
@@ -96,7 +100,7 @@ pub fn r_prepare_message_2(
         cred_r.bytes.as_slice(),
         &th_2,
         ead_2,
-    );
+    )?;
 
     // compute ciphertext_2
     let plaintext_2 = encode_plaintext_2(c_r, id_cred_r.as_encoded_value(), &mac_2, &ead_2)?;
@@ -106,11 +110,15 @@ pub fn r_prepare_message_2(
     let th_3 = compute_th_3(crypto, &th_2, &plaintext_2, cred_r.bytes.as_slice());
 
     let mut ct: BufferCiphertext2 = BufferCiphertext2::new();
-    ct.fill_with_slice(plaintext_2.as_slice()).unwrap(); // TODO(hax): can we prove with hax that this won't panic since they use the same underlying buffer length?
+    // plaintext_2: EdhocBuffer<MAX_MESSAGE_SIZE_LEN> so len <= MAX_MESSAGE_SIZE_LEN == N of ct
+    hax_lib::assert!(plaintext_2.len() <= MAX_MESSAGE_SIZE_LEN);
+    ct.fill_with_slice(plaintext_2.as_slice()).unwrap();
 
     let ciphertext_2 = encrypt_decrypt_ciphertext_2(crypto, &prk_2e, &th_2, &ct);
 
-    ct.fill_with_slice(ciphertext_2.as_slice()).unwrap(); // TODO(hax): same as just above.
+    // ciphertext_2: BufferCiphertext2 = EdhocBuffer<MAX_MESSAGE_SIZE_LEN>, same reasoning
+    hax_lib::assert!(ciphertext_2.len() <= MAX_MESSAGE_SIZE_LEN);
+    ct.fill_with_slice(ciphertext_2.as_slice()).unwrap();
 
     let message_2 = encode_message_2(&state.g_y, &ct);
 
@@ -180,7 +188,7 @@ pub fn r_verify_message_3(
         state.id_cred_i.as_full_value(),
         valid_cred_i.bytes.as_slice(),
         &state.ead_3,
-    );
+    )?;
 
     // verify mac_3
     if state.mac_3 == expected_mac_3 {
@@ -325,7 +333,7 @@ pub fn i_verify_message_2(
         valid_cred_r.bytes.as_slice(),
         &state.th_2,
         &state.ead_2,
-    );
+    )?;
 
     if state.mac_2 == expected_mac_2 {
         // step is actually from processing of message_3
@@ -373,7 +381,7 @@ pub fn i_prepare_message_3(
         id_cred_i.as_full_value(),
         cred_i.bytes.as_slice(),
         ead_3,
-    );
+    )?;
 
     let plaintext_3 = encode_plaintext_3(id_cred_i.as_encoded_value(), &mac_3, &ead_3)?;
     let message_3 = encrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3);
@@ -429,7 +437,11 @@ pub fn i_complete_without_message_4(state: &WaitM4) -> Result<Completed, EDHOCEr
         prk_exporter: state.prk_exporter,
     })
 }
-
+#[hax_lib::requires(
+    suites.len() <= MAX_SUITES_LEN &&
+    suites.len() < 24 &&
+    suites.len() > 0
+)]
 fn encode_message_1(
     method: EDHOCMethod,
     suites: &EdhocBuffer<MAX_SUITES_LEN>,
@@ -474,6 +486,11 @@ fn encode_message_1(
     Ok(output)
 }
 
+#[hax_lib::requires(
+    ciphertext_2.len() <= MAX_MESSAGE_SIZE_LEN &&
+    P256_ELEM_LEN + ciphertext_2.len() <= u8::MAX.into()
+)]
+#[hax_lib::ensures(|result| result.len() == 2 + P256_ELEM_LEN + ciphertext_2.len())]
 fn encode_message_2(g_y: &BytesP256ElemLen, ciphertext_2: &BufferCiphertext2) -> BufferMessage2 {
     let mut output: BufferMessage2 = BufferMessage2::new();
 
@@ -506,40 +523,54 @@ fn compute_th_2(
     crypto.sha256_digest(message.as_slice())
 }
 
+#[allow(unused_variables)]
 fn compute_th_3(
     crypto: &mut impl CryptoTrait,
     th_2: &BytesHashLen,
     plaintext_2: &BufferPlaintext2,
     cred_r: &[u8],
 ) -> BytesHashLen {
-    let mut hash = crypto.sha256_start();
-
-    hash.update([CBOR_BYTE_STRING, th_2.len() as u8]);
-    hash.update(th_2);
-
-    hash.update(plaintext_2.as_slice());
-    hash.update(cred_r);
-
-    hash.finalize().into()
+    #[cfg(not(hax))]
+    {
+        let mut hash = crypto.sha256_start();
+        hash.update([CBOR_BYTE_STRING, th_2.len() as u8]);
+        hash.update(th_2);
+        hash.update(plaintext_2.as_slice());
+        hash.update(cred_r);
+        hash.finalize().into()
+    }
+    // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
+    #[cfg(hax)]
+    {
+        [0u8; SHA256_DIGEST_LEN]
+    }
 }
 
+#[allow(unused_variables)]
 fn compute_th_4(
     crypto: &mut impl CryptoTrait,
     th_3: &BytesHashLen,
     plaintext_3: &BufferPlaintext3,
     cred_i: &[u8],
 ) -> BytesHashLen {
-    let mut hash = crypto.sha256_start();
-
-    hash.update([CBOR_BYTE_STRING, th_3.len() as u8]);
-    hash.update(th_3);
-    hash.update(plaintext_3.as_slice());
-    hash.update(cred_i);
-
-    hash.finalize().into()
+    #[cfg(not(hax))]
+    {
+        let mut hash = crypto.sha256_start();
+        hash.update([CBOR_BYTE_STRING, th_3.len() as u8]);
+        hash.update(th_3);
+        hash.update(plaintext_3.as_slice());
+        hash.update(cred_i);
+        hash.finalize().into()
+    }
+    // sha256_start relies on digest::Digest which has no F* model; stub for hax compilation
+    #[cfg(hax)]
+    {
+        [0u8; SHA256_DIGEST_LEN]
+    }
 }
 
 // TODO: consider moving this to a new 'edhoc crypto primitives' module
+#[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN && result.len() < 256)]
 fn edhoc_kdf(
     crypto: &mut impl CryptoTrait,
     prk: &BytesHashLen,
@@ -557,6 +588,7 @@ fn edhoc_kdf(
 /// This is a dedicated function because there's a whole lot of users of [`edhoc_kdf`] that just
 /// create a buffer, fill it and return it -- so this function does that.
 #[inline]
+#[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN && N < 256)]
 fn edhoc_kdf_owned<const N: usize>(
     crypto: &mut impl CryptoTrait,
     prk: &BytesHashLen,
@@ -568,6 +600,8 @@ fn edhoc_kdf_owned<const N: usize>(
     result
 }
 
+#[hax_lib::requires(id_cred_i.len() <= MAX_MESSAGE_SIZE_LEN)]
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_3(
     id_cred_i: &[u8],
     mac_3: &BytesMac3,
@@ -588,6 +622,7 @@ fn encode_plaintext_3(
     Ok(plaintext_3)
 }
 
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_4(ead_4: &EadItems) -> Result<BufferPlaintext4, EDHOCError> {
     let mut plaintext_4: BufferPlaintext4 = BufferPlaintext4::new();
 
@@ -596,6 +631,7 @@ fn encode_plaintext_4(ead_4: &EadItems) -> Result<BufferPlaintext4, EDHOCError> 
     Ok(plaintext_4)
 }
 
+#[hax_lib::requires(th_3.len() == SHA256_DIGEST_LEN)]
 fn encode_enc_structure(th_3: &BytesHashLen) -> BytesEncStructureLen {
     let encrypt0 = b"Encrypt0";
 
@@ -652,6 +688,7 @@ fn compute_k_4_iv_4(
 }
 
 // calculates ciphertext_3 wrapped in a cbor byte string
+#[hax_lib::requires(plaintext_3.len() + AES_CCM_TAG_LEN + 2 <= MAX_MESSAGE_SIZE_LEN)]
 fn encrypt_message_3(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,
@@ -671,10 +708,9 @@ fn encrypt_message_3(
         output.push(bytestring_length as _).unwrap();
     };
 
-    // FIXME: Make the function fallible, especially with the prospect of algorithm agility
-    assert!(
+    hax_lib::assert!(
         output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN,
-        "Tried to encode a message that is too large."
+        "message too large"
     );
 
     let enc_structure = encode_enc_structure(th_3);
@@ -737,6 +773,7 @@ fn decrypt_message_3(
     )
 }
 
+#[hax_lib::requires(plaintext_4.len() + AES_CCM_TAG_LEN + 2 <= MAX_MESSAGE_SIZE_LEN)]
 fn encrypt_message_4(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
@@ -818,32 +855,47 @@ fn decrypt_message_4(
 }
 
 // output must hold id_cred.len() + cred.len()
+#[hax_lib::requires(id_cred.len() + cred.len() + SHA256_DIGEST_LEN + 2 <= MAX_KDF_CONTEXT_LEN)]
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |ctx| ctx.len() <= MAX_KDF_CONTEXT_LEN))]
 fn encode_kdf_context(
     c_r: Option<ConnId>, // only present for MAC_2
     id_cred: &[u8],
     th: &BytesHashLen,
     cred: &[u8],
     ead: &EadItems,
-) -> BufferContext {
+) -> Result<BufferContext, EDHOCError> {
     // encode context in line
     // assumes ID_CRED_R and CRED_R are already CBOR-encoded (and also EAD)
     let mut output = BufferContext::new();
 
     if let Some(c_r) = c_r {
-        output.extend_from_slice(c_r.as_cbor()).unwrap();
+        output
+            .extend_from_slice(c_r.as_cbor())
+            .map_err(|_| EDHOCError::EncodingError)?;
     }
-    output.extend_from_slice(&id_cred).unwrap();
-    output.push(CBOR_BYTE_STRING).unwrap();
-    output.push(SHA256_DIGEST_LEN as u8).unwrap();
-    output.extend_from_slice(th).unwrap();
-    output.extend_from_slice(cred).unwrap();
+    output
+        .extend_from_slice(id_cred)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .push(CBOR_BYTE_STRING)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .push(SHA256_DIGEST_LEN as u8)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(th)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(cred)
+        .map_err(|_| EDHOCError::EncodingError)?;
 
     // NOTE: this re-encoding could be avoided by passing just a reference to ead in the decrypted plaintext
-    ead.encode(&mut output).unwrap();
+    ead.encode(&mut output)?;
 
-    output
+    Ok(output)
 }
 
+#[hax_lib::requires(id_cred_i.len() + cred_i.len() + SHA256_DIGEST_LEN + 2 <= MAX_KDF_CONTEXT_LEN)]
 fn compute_mac_3(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
@@ -851,19 +903,20 @@ fn compute_mac_3(
     id_cred_i: &[u8],
     cred_i: &[u8],
     ead_3: &EadItems,
-) -> BytesMac3 {
+) -> Result<BytesMac3, EDHOCError> {
     // MAC_3 = EDHOC-KDF( PRK_4e3m, 6, context_3, mac_length_3 )
-    let context = encode_kdf_context(None, id_cred_i, th_3, cred_i, ead_3);
+    let context = encode_kdf_context(None, id_cred_i, th_3, cred_i, ead_3)?;
 
     // compute mac_3
-    edhoc_kdf_owned(
+    Ok(edhoc_kdf_owned(
         crypto,
         prk_4e3m,
         6u8, // registered label for "MAC_3"
         context.as_slice(),
-    )
+    ))
 }
 
+#[hax_lib::requires(id_cred_r.len() + cred_r.len() + SHA256_DIGEST_LEN + 2 <= MAX_KDF_CONTEXT_LEN)]
 fn compute_mac_2(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,
@@ -872,14 +925,16 @@ fn compute_mac_2(
     cred_r: &[u8],
     th_2: &BytesHashLen,
     ead_2: &EadItems,
-) -> BytesMac2 {
+) -> Result<BytesMac2, EDHOCError> {
     // compute MAC_2
-    let context = encode_kdf_context(Some(c_r), id_cred_r, th_2, cred_r, ead_2);
+    let context = encode_kdf_context(Some(c_r), id_cred_r, th_2, cred_r, ead_2)?;
 
     // MAC_2 = EDHOC-KDF( PRK_3e2m, 2, context_2, mac_length_2 )
-    edhoc_kdf_owned(crypto, prk_3e2m, 2_u8, context.as_slice())
+    Ok(edhoc_kdf_owned(crypto, prk_3e2m, 2_u8, context.as_slice()))
 }
 
+#[hax_lib::requires(id_cred_r.len() <= MAX_MESSAGE_SIZE_LEN)]
+#[hax_lib::ensures(|result| result.as_ref().map_or(true, |pt| pt.len() <= MAX_MESSAGE_SIZE_LEN))]
 fn encode_plaintext_2(
     c_r: ConnId,
     id_cred_r: &[u8],
@@ -892,17 +947,16 @@ fn encode_plaintext_2(
     plaintext_2
         .extend_from_slice(c_r)
         .or(Err(EDHOCError::EncodingError))?;
-    // id_cred_r.write_to_message(&mut plaintext_2)?;
     plaintext_2
         .extend_from_slice(id_cred_r)
         .or(Err(EDHOCError::EncodingError))?;
-
     plaintext_2
         .push(CBOR_MAJOR_BYTE_STRING | MAC_LENGTH_2 as u8)
-        .unwrap();
-    plaintext_2.extend_from_slice(&mac_2[..]).unwrap();
+        .or(Err(EDHOCError::EncodingError))?;
+    plaintext_2
+        .extend_from_slice(&mac_2[..])
+        .or(Err(EDHOCError::EncodingError))?;
 
-    // Encode optional EAD_2
     ead_2.encode(&mut plaintext_2)?;
 
     Ok(plaintext_2)
@@ -1319,7 +1373,7 @@ mod tests {
             &CRED_I_TV,
             &EadItems::new(),
         );
-        assert_eq!(mac_3, MAC_3_TV);
+        assert_eq!(mac_3, Ok(MAC_3_TV));
     }
 
     #[test]
@@ -1334,7 +1388,7 @@ mod tests {
             &EadItems::new(),
         );
 
-        assert_eq!(rcvd_mac_2, MAC_2_TV);
+        assert_eq!(rcvd_mac_2, Ok(MAC_2_TV));
     }
 
     #[test]
