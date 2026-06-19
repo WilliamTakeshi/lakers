@@ -715,26 +715,28 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
-#[allow(dead_code)] // fields are only read inside #[cfg(not(hax))] Iterator impl
 pub struct EadItemsIter<'a> {
     items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
     pos: usize,
 }
 
-// Excluded from hax: the Iterator trait's t_Iterator typeclass requires f_next_pre to be a
-// tautology, so non-trivial preconditions on next() are forbidden. Without a requires, hax
-// cannot prove self.pos + 1 is in range. Internal EadItems methods use index loops instead
-// and are fully verified.
-#[cfg(not(hax))]
 impl<'a> Iterator for EadItemsIter<'a> {
     type Item = &'a EADItem;
     fn next(&mut self) -> Option<Self::Item> {
         let mut result: Option<&'a EADItem> = None;
-        while self.pos < MAX_EAD_ITEMS && result.is_none() {
-            let i = self.pos;
-            self.pos += 1;
+        // Cannot use self.pos.min(MAX_EAD_ITEMS): hax does not support f_min (Core_models.Cmp).
+        let mut i = if self.pos > MAX_EAD_ITEMS {
+            MAX_EAD_ITEMS
+        } else {
+            self.pos
+        };
+        while i < MAX_EAD_ITEMS && result.is_none() {
+            hax_lib::loop_decreases!(MAX_EAD_ITEMS - i);
+            hax_lib::loop_invariant!(i <= MAX_EAD_ITEMS);
             result = self.items[i].as_ref();
+            i += 1;
         }
+        self.pos = i;
         result
     }
 }
