@@ -25,9 +25,37 @@ cfg_if::cfg_if!(
         pub const fn default_crypto() -> Crypto {
             lakers_crypto_cryptocell310::Crypto
         }
+    } else if #[cfg(feature = "nrf54l15")] {
+        /// Fills in the software SHA-256 / HMAC layer on top of the nRF54L15 hardware `Cal`, which
+        /// only provides the raw SHA-2 plumbing (plus hardware AEAD, DH and RNG).
+        pub struct Nrf54l15ExtConfig;
+        impl embedded_cal_software_demo::ExtenderConfig for Nrf54l15ExtConfig {
+            const IMPLEMENT_SHA2SHORT: bool = true;
+            type Base = embedded_cal_nrf54l15::Nrf54l15Cal;
+        }
+        pub type Crypto = lakers_crypto_embedded_cal::Crypto<
+            embedded_cal_software_demo::Extender<Nrf54l15ExtConfig>,
+        >;
+        // No `default_crypto()`: the hardware `Cal` must be built from PAC peripherals, e.g.
+        //   Crypto::new(embedded_cal_software_demo::Extender::new(
+        //       embedded_cal_nrf54l15::Nrf54l15Cal::new(cracen, cracen_core)))
+    } else if #[cfg(feature = "stm32wba55")] {
+        /// Fills in the software SHA-256 layer on top of the STM32WBA55 hardware `Cal` (which
+        /// provides raw SHA-2 plumbing plus hardware AEAD, DH, HMAC and RNG).
+        pub struct Stm32wba55ExtConfig;
+        impl embedded_cal_software_demo::ExtenderConfig for Stm32wba55ExtConfig {
+            const IMPLEMENT_SHA2SHORT: bool = true;
+            type Base = embedded_cal_stm32wba55::Stm32wba55Cal;
+        }
+        pub type Crypto = lakers_crypto_embedded_cal::Crypto<
+            embedded_cal_software_demo::Extender<Stm32wba55ExtConfig>,
+        >;
+        // No `default_crypto()`: the hardware `Cal` must be built from PAC peripherals, e.g.
+        //   Crypto::new(embedded_cal_software_demo::Extender::new(
+        //       embedded_cal_stm32wba55::Stm32wba55Cal::new(hash, rcc, rng, aes, pka)))
     }
     else {
-        compile_error!("Either feature `psa` or `rustcrypto` or `cryptocell310` must be enabled.");
+        compile_error!("One of the features `psa`, `rustcrypto`, `cryptocell310`, `nrf54l15` or `stm32wba55` must be enabled.");
     }
 );
 

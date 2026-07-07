@@ -22,6 +22,16 @@ lakers-crypto-cryptocell310 = { workspace = true, optional = true }
 lakers-crypto-rustcrypto = { workspace = true, optional = true }
 rand_core = { version = "0.6.4", optional = true, default-features = false }
 
+# embedded-cal backends (nRF54L15 / STM32WBA55 hardware acceleration). These reach into the sibling
+# embedded-cal repository and target cortex-m; they are only compiled when their feature is enabled.
+lakers-crypto-embedded-cal = { workspace = true, optional = true }
+# embedded-cal-software-demo = { path = "../../embedded-cal/embedded-cal-software-demo", optional = true }
+# embedded-cal-nrf54l15 = { path = "../../embedded-cal/embedded-cal-nrf54l15", optional = true }
+# embedded-cal-stm32wba55 = { path = "../../embedded-cal/embedded-cal-stm32wba55", optional = true }
+embedded-cal-software-demo = { git = "https://github.com/lake-rs/embedded-cal", optional = true }
+embedded-cal-nrf54l15 = { git = "https://github.com/lake-rs/embedded-cal", optional = true }
+embedded-cal-stm32wba55 = { git = "https://github.com/lake-rs/embedded-cal", optional = true }
+
 [dev-dependencies]
 hexlit = "0.5.3"
 rstest = "0.11.0"
@@ -36,3 +46,7 @@ cryptocell310 = [ "lakers-crypto-cryptocell310" ]
 # lakers-crypto-rustcrypto on their own, and combine it with an entropy choice
 # of their avail.
 rustcrypto = [ "lakers-crypto-rustcrypto", "rand_core/getrandom" ]
+# Hardware-accelerated backends via embedded-cal. The hardware Cal must be constructed from PAC
+# peripherals by the application (there is no `default_crypto()` for these); see `crypto/src/lib.rs`.
+nrf54l15 = [ "lakers-crypto-embedded-cal", "embedded-cal-software-demo", "embedded-cal-nrf54l15" ]
+stm32wba55 = [ "lakers-crypto-embedded-cal", "embedded-cal-software-demo", "embedded-cal-stm32wba55" ]
