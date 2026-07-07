@@ -33,8 +33,8 @@ impl<C> core::fmt::Debug for Crypto<C> {
     }
 }
 
-use embedded_cal::{Cal, HashAlgorithm, HashProvider};
-use embedded_cal::accessor::HashAlgorithmOf;
+use embedded_cal::accessor::{HashAlgorithmOf, HmacAlgorithmOf};
+use embedded_cal::{Cal, HashAlgorithm, HashProvider, HkdfProvider, HmacAlgorithm};
 use lakers_shared::{
     BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
     Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
@@ -71,12 +71,26 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
         sha2::Sha256::new()
     }
 
-    fn hkdf_expand(&mut self, _prk: &BytesHashLen, _info: &[u8], _result: &mut [u8]) {
-        unimplemented!("hkdf_expand: implemented in a later step")
+    fn hkdf_expand(&mut self, prk: &BytesHashLen, info: &[u8], result: &mut [u8]) {
+        // HKDF is provided by embedded-cal as a blanket impl over the HMAC provider (RFC 5869);
+        // HMAC-SHA-256 is COSE algorithm 5.
+        let alg = HmacAlgorithmOf::<C>::from_cose_number(5).expect("cal must support hmac-sha-256");
+        self.cal
+            .hmac()
+            .hkdf_expand(alg, prk, info, result)
+            .expect("output length fits within 255 * hashlen");
     }
 
-    fn hkdf_extract(&mut self, _salt: &BytesHashLen, _ikm: &BytesP256ElemLen) -> BytesHashLen {
-        unimplemented!("hkdf_extract: implemented in a later step")
+    fn hkdf_extract(&mut self, salt: &BytesHashLen, ikm: &BytesP256ElemLen) -> BytesHashLen {
+        let alg = HmacAlgorithmOf::<C>::from_cose_number(5).expect("cal must support hmac-sha-256");
+        let prk = self
+            .cal
+            .hmac()
+            .hkdf_extract(alg, Some(salt), ikm)
+            .expect("hkdf-extract over a present salt is infallible");
+        prk.as_ref()
+            .try_into()
+            .expect("hmac-sha-256 output is exactly 32 bytes")
     }
 
     fn aes_ccm_encrypt<const N: usize, Tag: CcmTagLen>(
