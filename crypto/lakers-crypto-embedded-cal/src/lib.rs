@@ -212,3 +212,188 @@ fn aes_ccm_algorithm<C: Cal, Tag: CcmTagLen>() -> AeadAlgorithmOf<C> {
     };
     AeadAlgorithmOf::<C>::from_cose_number(cose_number).expect("cal must support aes-ccm-16-64-128")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use embedded_cal::accessor::{AeadProviderOf, DhProviderOf, HashProviderOf};
+    use embedded_cal::{HmacProvider, HmacAlgorithm};
+    use embedded_cal_rustcrypto::RustcryptoCal;
+    use hmac::Mac;
+    use lakers_shared::{test_helper, CcmTagLen8};
+
+    /// A host-only composite [`Cal`]: `RustcryptoCal` provides hash / AEAD / DH / RNG in software
+    /// but no longer provides HMAC, so we add software HMAC-SHA-256 here. That makes HKDF available
+    /// (blanket impl over `HmacProvider`) and gives us a complete host-runnable `Cal` to exercise
+    /// the adapter against.
+    #[derive(Default)]
+    struct TestCal(RustcryptoCal);
+
+    impl Cal for TestCal {
+        type DhProvider = DhProviderOf<RustcryptoCal>;
+        type AeadProvider = AeadProviderOf<RustcryptoCal>;
+        type HashProvider = HashProviderOf<RustcryptoCal>;
+        type HmacProvider = Self;
+
+        fn dh(&mut self) -> &mut Self::DhProvider {
+            self.0.dh()
+        }
+        fn aead(&mut self) -> &mut Self::AeadProvider {
+            self.0.aead()
+        }
+        fn hash(&mut self) -> &mut Self::HashProvider {
+            // `RustcryptoCal` implements both `Cal` and `HashProvider` (which also has a `hash`
+            // method), so the accessor must be named explicitly.
+            Cal::hash(&mut self.0)
+        }
+        fn hmac(&mut self) -> &mut Self::HmacProvider {
+            self
+        }
+    }
+
+    impl rand_core::TryRng for TestCal {
+        type Error = <RustcryptoCal as rand_core::TryRng>::Error;
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            self.0.try_next_u32()
+        }
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            self.0.try_next_u64()
+        }
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+            self.0.try_fill_bytes(dst)
+        }
+    }
+    impl rand_core::TryCryptoRng for TestCal {}
+
+    // --- software HMAC-SHA-256 for TestCal ---
+
+    #[derive(Clone, PartialEq, Eq, Debug)]
+    enum TestHmacAlgorithm {
+        HmacSha256,
+    }
+
+    impl HmacAlgorithm for TestHmacAlgorithm {
+        const MAX_LEN: usize = 32;
+        type MaxLenBuf = [u8; 32];
+        fn len(&self) -> usize {
+            32
+        }
+        fn from_cose_number(number: impl Into<i128>) -> Option<Self> {
+            match number.into() {
+                5 => Some(Self::HmacSha256),
+                _ => None,
+            }
+        }
+    }
+
+    type HmacSha256 = hmac::Hmac<sha2::Sha256>;
+
+    struct TestHmacOutput([u8; 32]);
+    impl AsRef<[u8]> for TestHmacOutput {
+        fn as_ref(&self) -> &[u8] {
+            &self.0
+        }
+    }
+
+    impl HmacProvider for TestCal {
+        type Algorithm = TestHmacAlgorithm;
+        type Key = HmacSha256;
+        type State = HmacSha256;
+        type Output = TestHmacOutput;
+
+        fn load_from_keydata(&mut self, _algorithm: Self::Algorithm, key: &[u8]) -> Self::Key {
+            HmacSha256::new_from_slice(key).expect("hmac accepts a key of any length")
+        }
+        fn init(&mut self, key: Self::Key) -> Self::State {
+            key
+        }
+        fn update(&mut self, state: &mut Self::State, data: &[u8]) {
+            Mac::update(state, data);
+        }
+        fn finalize(&mut self, state: Self::State) -> Self::Output {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&state.finalize().into_bytes());
+            TestHmacOutput(out)
+        }
+    }
+
+    fn crypto() -> Crypto<TestCal> {
+        Crypto::new(TestCal::default())
+    }
+
+    // Compile-time guard that the adapter actually implements the lakers Crypto trait.
+    #[allow(dead_code)]
+    fn assert_implements_crypto<T: CryptoTrait>() {}
+    #[allow(dead_code)]
+    fn test_implements_crypto() {
+        assert_implements_crypto::<Crypto<TestCal>>()
+    }
+
+    #[test]
+    fn sha256_matches_vectors() {
+        let mut c = crypto();
+        test_helper::test_sha256_digest(&mut c);
+        for (input, expected) in testvectors::SHA256HASHES {
+            assert_eq!(c.sha256_digest(input), *expected);
+        }
+    }
+
+    #[test]
+    fn hkdf_expand_matches_vectors() {
+        let mut c = crypto();
+        for (_salt, _ikm, info, expected_prk, expected_okm) in testvectors::HKDF_SHA256 {
+            let expected_okm: &[u8] = expected_okm;
+            let mut buf = [0u8; 82];
+            let okm = &mut buf[..expected_okm.len()];
+            c.hkdf_expand(expected_prk, info, okm);
+            assert_eq!(&*okm, expected_okm);
+        }
+    }
+
+    /// Exercises the extract path and the HMAC that the adapter's HKDF forwards to, using
+    /// embedded-cal's own RFC 5869 / RFC 4231 known-answer tests.
+    #[test]
+    fn hkdf_and_hmac_via_embedded_cal_vectors() {
+        let mut cal = TestCal::default();
+        testvectors::test_hkdf_sha256(&mut cal);
+        testvectors::test_hmac_sha256(&mut cal);
+    }
+
+    #[test]
+    fn aes_ccm_tag8_roundtrip() {
+        let mut c = crypto();
+        test_helper::test_aes_ccm_tag_8(&mut c);
+        test_helper::test_aes_ccm_roundtrip::<_, CcmTagLen8>(&mut c);
+    }
+
+    /// P-256 ECDH known-answer test, RFC 5903 Section 8.1 (copied from
+    /// `embedded-cal/testvectors/src/dh.rs`). lakers exchanges the compact x-only public key.
+    #[test]
+    fn p256_ecdh_rfc5903() {
+        use hexlit::hex;
+        let alice_private =
+            hex!("C88F01F510D9AC3F70A292DAA2316DE544E9AAB8AFE84049C62A9C57862D1433");
+        let alice_public =
+            hex!("DAD0B65394221CF9B051E1FECA5787D098DFE637FC90B9EF945D0C3772581180");
+        let bob_private = hex!("C6EF9C5D78AE012A011164ACB397CE2088685D8F06BF9BE0B283AB46476BEE53");
+        let bob_public = hex!("D12DFB5289C8D4F81208B70270398C342296970A0BCCB74C736FC7554494BF63");
+        let shared = hex!("D6840F6B42F6EDAFD13116E0E12565202FEF8E9ECE7DCE03812464D04B9442DE");
+
+        let mut c = crypto();
+        assert_eq!(c.p256_ecdh(&alice_private, &bob_public), shared);
+        assert_eq!(c.p256_ecdh(&bob_private, &alice_public), shared);
+    }
+
+    #[test]
+    fn p256_generate_key_pair_selftest() {
+        let mut c = crypto();
+        let (private_a, public_a) = c.p256_generate_key_pair();
+        let (private_b, public_b) = c.p256_generate_key_pair();
+        assert_ne!(private_a, private_b, "two generated keys should differ");
+        // Both parties derive the same shared secret.
+        assert_eq!(
+            c.p256_ecdh(&private_a, &public_b),
+            c.p256_ecdh(&private_b, &public_a),
+        );
+    }
+}

@@ -21,5 +21,6 @@ sha2 = { version = "0.10", default-features = false }
 # A complete software Cal for host tests: RustcryptoCal provides hash/AEAD/DH/RNG; we add a small
 # software HMAC provider on top (see the `test_cal` module) so HKDF works via the blanket impl.
 embedded-cal-rustcrypto = { path = "../../../embedded-cal/embedded-cal-rustcrypto" }
+testvectors = { path = "../../../embedded-cal/testvectors" }
 hmac = { version = "0.12", default-features = false }
-hexlit = "0.5.3"
+hexlit = "0.5.5"
