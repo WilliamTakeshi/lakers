@@ -33,9 +33,12 @@ impl<C> core::fmt::Debug for Crypto<C> {
     }
 }
 
-use embedded_cal::accessor::{AeadAlgorithmOf, HashAlgorithmOf, HmacAlgorithmOf};
+use embedded_cal::accessor::{
+    AeadAlgorithmOf, DhAlgorithmOf, DhSecretKeyOf, HashAlgorithmOf, HmacAlgorithmOf,
+};
 use embedded_cal::{
-    AeadAlgorithm, AeadProvider, Cal, HashAlgorithm, HashProvider, HkdfProvider, HmacAlgorithm,
+    AeadAlgorithm, AeadProvider, Cal, DhAlgorithm, DhProvider, HashAlgorithm, HashProvider,
+    HkdfProvider, HmacAlgorithm,
 };
 use lakers_shared::{
     BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
@@ -144,18 +147,57 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
 
     fn p256_ecdh(
         &mut self,
-        _private_key: &BytesP256ElemLen,
-        _public_key: &BytesP256ElemLen,
+        private_key: &BytesP256ElemLen,
+        public_key: &BytesP256ElemLen,
     ) -> BytesP256ElemLen {
-        unimplemented!("p256_ecdh: implemented in a later step")
+        // COSE elliptic curve 1 is P-256. Public keys cross the embedded-cal boundary in the
+        // compact 32-byte x-only representation, which is exactly lakers' representation.
+        let alg = DhAlgorithmOf::<C>::from_cose_ecdh(1).expect("cal must support ecdh p-256");
+        let dh = self.cal.dh();
+        let secret: DhSecretKeyOf<C> = dh
+            .import_secretkey_bytes(alg.clone(), private_key)
+            .expect("private key is a valid p-256 scalar")
+            .into();
+        let public = dh
+            .import_publickey_bytes(alg, public_key)
+            .expect("public key is a valid compact p-256 point");
+        let shared = dh
+            .shared_secret(&secret, &public)
+            .expect("both keys are for p-256");
+        let secret_bytes = dh
+            .raw_secret_bytes(&shared)
+            .as_ref()
+            .try_into()
+            .expect("p-256 shared secret is exactly 32 bytes");
+        secret_bytes
     }
 
     fn get_random_byte(&mut self) -> u8 {
-        unimplemented!("get_random_byte: implemented in a later step")
+        let mut byte = [0u8; 1];
+        self.cal
+            .try_fill_bytes(&mut byte)
+            .expect("cal random number generation must not fail");
+        byte[0]
     }
 
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen) {
-        unimplemented!("p256_generate_key_pair: implemented in a later step")
+        let alg = DhAlgorithmOf::<C>::from_cose_ecdh(1).expect("cal must support ecdh p-256");
+        let dh = self.cal.dh();
+        let visible_secret = dh.generate_visible(alg);
+        let private_key = dh
+            .export_secretkey_bytes(&visible_secret)
+            .as_ref()
+            .try_into()
+            .expect("p-256 scalar is exactly 32 bytes");
+        // The public key is exported in compact x-only form (32 bytes), matching lakers.
+        let secret: DhSecretKeyOf<C> = visible_secret.into();
+        let public = dh.public_key(&secret);
+        let public_key = dh
+            .export_publickey_bytes(&public)
+            .as_ref()
+            .try_into()
+            .expect("compact p-256 public key is exactly 32 bytes");
+        (private_key, public_key)
     }
 }
 
