@@ -32,3 +32,86 @@ impl<C> core::fmt::Debug for Crypto<C> {
             .finish()
     }
 }
+
+use embedded_cal::{Cal, HashAlgorithm, HashProvider};
+use embedded_cal::accessor::HashAlgorithmOf;
+use lakers_shared::{
+    BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
+    Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
+};
+
+impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
+    fn supported_suites(&self) -> EdhocBuffer<MAX_SUITES_LEN> {
+        EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[EDHOCSuite::CipherSuite2 as u8])
+            .expect("the slice is of a length that always fits")
+    }
+
+    fn sha256_digest(&mut self, message: &[u8]) -> BytesHashLen {
+        // SHA-256 is IANA Named-Information hash id 1; every EDHOC-capable `Cal` provides it.
+        let alg = HashAlgorithmOf::<C>::from_ni_id(1).expect("cal must support sha-256");
+        let digest = self.cal.hash().hash(alg, message);
+        digest
+            .as_ref()
+            .try_into()
+            .expect("sha-256 output is exactly 32 bytes")
+    }
+
+    // The `digest::Digest` interface requires an owned, `Default`-constructible hasher, which cannot
+    // hold a `&mut` into the `Cal`'s hash provider. We therefore use a self-contained software
+    // hasher for the streaming interface (the same compromise the psa backend makes); the one-shot
+    // `sha256_digest` above still routes through the `Cal` and thus any hardware acceleration.
+    type HashInProcess<'a>
+        = sha2::Sha256
+    where
+        Self: 'a;
+
+    #[inline]
+    fn sha256_start<'a>(&'a mut self) -> Self::HashInProcess<'a> {
+        use digest::Digest;
+        sha2::Sha256::new()
+    }
+
+    fn hkdf_expand(&mut self, _prk: &BytesHashLen, _info: &[u8], _result: &mut [u8]) {
+        unimplemented!("hkdf_expand: implemented in a later step")
+    }
+
+    fn hkdf_extract(&mut self, _salt: &BytesHashLen, _ikm: &BytesP256ElemLen) -> BytesHashLen {
+        unimplemented!("hkdf_extract: implemented in a later step")
+    }
+
+    fn aes_ccm_encrypt<const N: usize, Tag: CcmTagLen>(
+        &mut self,
+        _key: &BytesCcmKeyLen,
+        _iv: &BytesCcmIvLen,
+        _ad: &[u8],
+        _plaintext: &[u8],
+    ) -> EdhocBuffer<N> {
+        unimplemented!("aes_ccm_encrypt: implemented in a later step")
+    }
+
+    fn aes_ccm_decrypt<const N: usize, Tag: CcmTagLen>(
+        &mut self,
+        _key: &BytesCcmKeyLen,
+        _iv: &BytesCcmIvLen,
+        _ad: &[u8],
+        _ciphertext: &[u8],
+    ) -> Result<EdhocBuffer<N>, EDHOCError> {
+        unimplemented!("aes_ccm_decrypt: implemented in a later step")
+    }
+
+    fn p256_ecdh(
+        &mut self,
+        _private_key: &BytesP256ElemLen,
+        _public_key: &BytesP256ElemLen,
+    ) -> BytesP256ElemLen {
+        unimplemented!("p256_ecdh: implemented in a later step")
+    }
+
+    fn get_random_byte(&mut self) -> u8 {
+        unimplemented!("get_random_byte: implemented in a later step")
+    }
+
+    fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen) {
+        unimplemented!("p256_generate_key_pair: implemented in a later step")
+    }
+}
