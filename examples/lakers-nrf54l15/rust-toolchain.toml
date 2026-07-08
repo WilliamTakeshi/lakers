@@ -1,0 +1,6 @@
+# The embedded-cal backend chain (embedded-cal-software-demo) uses features stabilised after
+# lakers' workspace-pinned nightly, so this example builds on stable. Placing the toolchain file
+# here overrides the parent `rust-toolchain` only for commands run from this directory.
+[toolchain]
+channel = "stable"
+targets = ["thumbv8m.main-none-eabihf"]
