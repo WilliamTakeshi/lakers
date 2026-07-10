@@ -217,7 +217,7 @@ fn aes_ccm_algorithm<C: Cal, Tag: CcmTagLen>() -> AeadAlgorithmOf<C> {
 mod tests {
     use super::*;
     use embedded_cal::accessor::{AeadProviderOf, DhProviderOf, HashProviderOf};
-    use embedded_cal::{HmacProvider, HmacAlgorithm};
+    use embedded_cal::{HmacAlgorithm, HmacProvider};
     use embedded_cal_rustcrypto::RustcryptoCal;
     use hmac::Mac;
     use lakers_shared::{test_helper, CcmTagLen8};
@@ -373,8 +373,7 @@ mod tests {
         use hexlit::hex;
         let alice_private =
             hex!("C88F01F510D9AC3F70A292DAA2316DE544E9AAB8AFE84049C62A9C57862D1433");
-        let alice_public =
-            hex!("DAD0B65394221CF9B051E1FECA5787D098DFE637FC90B9EF945D0C3772581180");
+        let alice_public = hex!("DAD0B65394221CF9B051E1FECA5787D098DFE637FC90B9EF945D0C3772581180");
         let bob_private = hex!("C6EF9C5D78AE012A011164ACB397CE2088685D8F06BF9BE0B283AB46476BEE53");
         let bob_public = hex!("D12DFB5289C8D4F81208B70270398C342296970A0BCCB74C736FC7554494BF63");
         let shared = hex!("D6840F6B42F6EDAFD13116E0E12565202FEF8E9ECE7DCE03812464D04B9442DE");

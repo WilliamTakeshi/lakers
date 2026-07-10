@@ -186,7 +186,8 @@ impl Radio {
             w.set_skipaddr(Skipaddr::SKIP);
         });
         r.crcpoly().write(|w| w.set_crcpoly(CRC_POLY & 0x00ff_ffff));
-        r.crcinit().write(|w| w.set_crcinit(ADV_CRC_INIT & 0x00ff_ffff));
+        r.crcinit()
+            .write(|w| w.set_crcinit(ADV_CRC_INIT & 0x00ff_ffff));
 
         // Access address 0xAA_BB_CC_DD -> BASE0 = 0xBB_CC_DD_00 (truncated to 3 bytes), PREFIX = 0xAA.
         r.base0().write_value(ADV_ADDRESS << 8);
