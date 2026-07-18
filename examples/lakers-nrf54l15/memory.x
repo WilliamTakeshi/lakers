@@ -1,0 +1,6 @@
+/* nRF54L15 memory layout (matches embedded-cal-nrf54l15) */
+MEMORY
+{
+  FLASH : ORIGIN = 0x00000000, LENGTH = 1524K
+  RAM : ORIGIN = 0x20000000, LENGTH = 256K
+}

@@ -1,0 +1,30 @@
+[package]
+name = "lakers-crypto-embedded-cal"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "EDHOC crypto library backend based on the embedded-cal crypto abstraction layer"
+repository.workspace = true
+readme.workspace = true
+
+[dependencies]
+lakers-shared.workspace = true
+
+# Path dependency into the sibling embedded-cal repository. embedded-cal is edition 2024 /
+# resolver 3; keep this crate out of the host default-members set.
+# embedded-cal = { path = "../../../embedded-cal/embedded-cal" }
+embedded-cal = { git = "https://github.com/lake-rs/embedded-cal/" }
+
+rand_core = { version = "0.10", default-features = false }
+digest = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+
+[dev-dependencies]
+# A complete software Cal for host tests: RustcryptoCal provides hash/AEAD/DH/RNG; we add a small
+# software HMAC provider on top (see the `test_cal` module) so HKDF works via the blanket impl.
+# embedded-cal-rustcrypto = { path = "../../../embedded-cal/embedded-cal-rustcrypto" }
+embedded-cal-rustcrypto = { git = "https://github.com/lake-rs/embedded-cal/" }
+# testvectors = { path = "../../../embedded-cal/testvectors" }
+testvectors = { git = "https://github.com/lake-rs/embedded-cal/" }
+hmac = { version = "0.12", default-features = false }
+hexlit = "0.5.5"
