@@ -15,7 +15,6 @@ pub use cbor_decoder::*;
 pub use edhoc_parser::*;
 pub use helpers::*;
 
-use core::num::NonZeroI16;
 use defmt_or_log::trace;
 
 mod crypto;
@@ -27,122 +26,16 @@ pub use cred::*;
 mod buffer;
 pub use buffer::*;
 
+pub mod consts;
+pub use consts::*;
+
+mod error;
+pub use error::{EDHOCError, ErrCode};
+
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
 #[cfg(feature = "python-bindings")]
 mod python_bindings;
-
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_MESSAGE_SIZE_LEN: usize = if cfg!(feature = "max_message_size_len_1024") {
-    1024
-} else if cfg!(feature = "max_message_size_len_512") {
-    512
-} else if cfg!(feature = "max_message_size_len_448") {
-    448
-} else if cfg!(feature = "max_message_size_len_384") {
-    384
-} else if cfg!(feature = "max_message_size_len_320") {
-    320
-} else if cfg!(feature = "max_message_size_len_256") {
-    256
-} else {
-    // need 128 to handle EAD fields, and 192 for the EAD_1 voucher
-    128 + 64
-};
-
-pub const ID_CRED_LEN: usize = 4;
-pub const SUITES_LEN: usize = 9;
-pub const SUPPORTED_SUITES_LEN: usize = 1;
-pub const EDHOC_METHOD: u8 = 3u8; // stat-stat is the only supported method
-pub const P256_ELEM_LEN: usize = 32;
-pub const ELEM_LEN_PSK: usize = 16;
-pub const SHA256_DIGEST_LEN: usize = 32;
-pub const AES_CCM_KEY_LEN: usize = 16;
-pub const AES_CCM_IV_LEN: usize = 13;
-pub const AES_CCM_TAG_LEN: usize = 8;
-pub const MAC_LENGTH: usize = 8; // used for EAD Zeroconf
-pub const MAC_LENGTH_2: usize = MAC_LENGTH;
-pub const MAC_LENGTH_3: usize = MAC_LENGTH_2;
-pub const VOUCHER_LEN: usize = MAC_LENGTH;
-pub const MAX_EAD_ITEMS: usize = 4;
-
-// maximum supported length of connection identifier for R
-//
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_KDF_CONTEXT_LEN: usize = if cfg!(feature = "max_kdf_content_len_1024") {
-    1024
-} else if cfg!(feature = "max_kdf_content_len_512") {
-    512
-} else if cfg!(feature = "max_kdf_content_len_448") {
-    448
-} else if cfg!(feature = "max_kdf_content_len_384") {
-    384
-} else if cfg!(feature = "max_kdf_content_len_320") {
-    320
-} else {
-    256
-};
-pub const MAX_KDF_LABEL_LEN: usize = 15; // for "KEYSTREAM_2"
-
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_BUFFER_LEN: usize = if cfg!(feature = "max_buffer_len_1024") {
-    1024
-} else if cfg!(feature = "max_buffer_len_512") {
-    512
-} else if cfg!(feature = "max_buffer_len_448") {
-    448
-} else if cfg!(feature = "max_buffer_len_384") {
-    384
-} else {
-    256 + 64
-};
-pub const CBOR_BYTE_STRING: u8 = 0x58u8;
-pub const CBOR_TEXT_STRING: u8 = 0x78u8;
-pub const CBOR_UINT_1BYTE: u8 = 0x18u8;
-pub const CBOR_NEG_INT_1BYTE_START: u8 = 0x20u8;
-pub const CBOR_NEG_INT_1BYTE_END: u8 = 0x37u8;
-pub const CBOR_UINT_1BYTE_START: u8 = 0x0u8;
-pub const CBOR_UINT_1BYTE_END: u8 = 0x17u8;
-const CBOR_MAJOR_UNSIGNED: u8 = 0 << 5;
-const CBOR_MAJOR_NEGATIVE: u8 = 1 << 5;
-const CBOR_MAJOR_TAG: u8 = 6 << 5;
-const CBOR_MAJOR_FLOATSIMPLE: u8 = 7 << 5;
-pub const CBOR_MAJOR_TEXT_STRING: u8 = 0x60u8;
-pub const CBOR_MAJOR_BYTE_STRING: u8 = 0x40u8;
-pub const CBOR_MAJOR_BYTE_STRING_MAX: u8 = 0x57u8;
-pub const CBOR_MAJOR_ARRAY: u8 = 0x80u8;
-pub const CBOR_MAJOR_ARRAY_MAX: u8 = 0x97u8;
-pub const CBOR_MAJOR_MAP: u8 = 0xA0;
-pub const MAX_INFO_LEN: usize = 2 + SHA256_DIGEST_LEN + // 32-byte digest as bstr
-				            1 + MAX_KDF_LABEL_LEN +     // label <24 bytes as tstr
-						    1 + MAX_KDF_CONTEXT_LEN +   // context <24 bytes as bstr
-						    1; // length as u8
-
-pub const KCCS_LABEL: u8 = 14;
-#[deprecated(note = "Typo for KCCS_LABEL")]
-pub const KCSS_LABEL: u8 = KCCS_LABEL;
-pub const KID_LABEL: u8 = 4;
-
-pub const ENC_STRUCTURE_LEN: usize = 8 + 5 + SHA256_DIGEST_LEN; // 8 for ENCRYPT0
-pub const ENC_STRUCTURE_PSK_LEN: usize = 1 + 1 + 8 + 1 + EXTERNAL_AAD_PSK_LEN; //
-pub const EXTERNAL_AAD_PSK_LEN: usize = 1 + 1 + 2 + 32 + 2 + 38 + 2 + 38 + 1;
-pub const MAX_EAD_LEN: usize = if cfg!(feature = "max_ead_len_1024") {
-    1024
-} else if cfg!(feature = "max_ead_len_768") {
-    768
-} else if cfg!(feature = "max_ead_len_512") {
-    512
-} else if cfg!(feature = "max_ead_len_384") {
-    384
-} else if cfg!(feature = "max_ead_len_256") {
-    256
-} else if cfg!(feature = "max_ead_len_192") {
-    192
-} else if cfg!(feature = "max_ead_len_128") {
-    128
-} else {
-    64
-};
 
 /// Maximum length of a [`ConnId`] (`C_x`).
 ///
@@ -401,81 +294,6 @@ impl From<EDHOCSuite> for u8 {
     fn from(suite: EDHOCSuite) -> u8 {
         suite as u8
     }
-}
-
-#[derive(PartialEq, Debug)]
-#[non_exhaustive]
-pub enum EDHOCError {
-    /// In an exchange, a credential was set as "expected", but the credential configured by the
-    /// peer did not match what was presented. This is more an application internal than an EDHOC
-    /// error: When the application sets the expected credential, that process should be informed
-    /// by the known details.
-    UnexpectedCredential,
-    MissingIdentity,
-    IdentityAlreadySet,
-    MacVerificationFailed,
-    UnsupportedMethod,
-    UnsupportedCipherSuite,
-    ParsingError,
-    EncodingError,
-    CredentialTooLongError,
-    EadLabelTooLongError,
-    EadTooLongError,
-    /// An EAD was received that was either not known (and critical), or not understood, or
-    /// otherwise erroneous.
-    EADUnprocessable,
-    /// The credential or EADs could be processed (possibly by a third party), but the decision
-    /// based on that was to not to continue the EDHOC session.
-    ///
-    /// See also
-    /// <https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz#name-edhoc-error-access-denied>
-    AccessDenied,
-}
-
-impl EDHOCError {
-    /// The ERR_CODE corresponding to the error
-    ///
-    /// Errors that refer to internal limitations (such as EadTooLongError) are treated the same
-    /// way as parsing errors, and return an unspecified error: Those are equivalent to limitations
-    /// of the parser, and a constrained system can not be expected to differentiate between "the
-    /// standard allows this but my number space is too small" and "this violates the standard".
-    ///
-    /// If an EDHOCError is returned through EDHOC, it will use this in its EDHOC error message.
-    ///
-    /// Note that this on its own is insufficient to create an error message: Additional ERR_INFO
-    /// is needed, which may or may not be available with the EDHOCError alone.
-    ///
-    /// TODO: Evolve the EDHOCError type such that all information needed is available.
-    pub fn err_code(&self) -> ErrCode {
-        use EDHOCError::*;
-        match self {
-            UnexpectedCredential => ErrCode::UNSPECIFIED,
-            MissingIdentity => ErrCode::UNSPECIFIED,
-            IdentityAlreadySet => ErrCode::UNSPECIFIED,
-            MacVerificationFailed => ErrCode::UNSPECIFIED,
-            UnsupportedMethod => ErrCode::UNSPECIFIED,
-            UnsupportedCipherSuite => ErrCode::WRONG_SELECTED_CIPHER_SUITE,
-            ParsingError => ErrCode::UNSPECIFIED,
-            EncodingError => ErrCode::UNSPECIFIED,
-            CredentialTooLongError => ErrCode::UNSPECIFIED,
-            EadLabelTooLongError => ErrCode::UNSPECIFIED,
-            EadTooLongError => ErrCode::UNSPECIFIED,
-            EADUnprocessable => ErrCode::UNSPECIFIED,
-            AccessDenied => ErrCode::ACCESS_DENIED,
-        }
-    }
-}
-
-/// Representation of an EDHOC ERR_CODE
-#[repr(C)]
-pub struct ErrCode(pub NonZeroI16);
-
-impl ErrCode {
-    pub const UNSPECIFIED: Self = ErrCode(NonZeroI16::new(1).unwrap());
-    pub const WRONG_SELECTED_CIPHER_SUITE: Self = ErrCode(NonZeroI16::new(2).unwrap());
-    pub const UNKNOWN_CREDENTIAL: Self = ErrCode(NonZeroI16::new(3).unwrap());
-    // Code requested in https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz
-    pub const ACCESS_DENIED: Self = ErrCode(NonZeroI16::new(3333).unwrap());
 }
 
 #[derive(Debug)]
@@ -1359,8 +1177,7 @@ mod cbor_decoder {
         /// Decode a `u8` value.
         pub fn u8(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            // NOTE: thid could be a `match` with `n @ 0x00..=0x17` clauses but hax doesn't support it
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n)
             } else if 0x18 == n {
                 self.read()
@@ -1372,14 +1189,20 @@ mod cbor_decoder {
         /// Decode an `i8` value.
         pub fn i8(&mut self) -> Result<i8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n as i8)
-            } else if (0x20..=0x37).contains(&n) {
+            } else if n >= 0x20 && n <= 0x37 {
                 Ok(-1 - (n - 0x20) as i8)
             } else if 0x18 == n {
                 Ok(self.read()? as i8)
             } else if 0x38 == n {
-                Ok(-1 - (self.read()? - 0x20) as i8)
+                let b = self.read()?;
+                // -1 - b fits in i8 only when b <= 127 (result -128..-1)
+                if b <= 127 {
+                    Ok(-1 - b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else {
                 Err(CBORError::DecodingError)
             }
@@ -1389,9 +1212,12 @@ mod cbor_decoder {
         pub fn i32_limited(&mut self) -> Result<i32, CBORError> {
             let (major, argument) = self.read_major_argument16()?;
             match major {
-                CBOR_MAJOR_UNSIGNED => Ok(i32::from(argument)),
+                // u16 always fits in i32
+                CBOR_MAJOR_UNSIGNED => Ok(argument as i32),
                 // Can not underflow
-                CBOR_MAJOR_NEGATIVE => Ok(-1 - i32::from(argument)),
+                // argument as i32 is in 0..=65535, so -1 - argument is in -65536..=-1,
+                // so the subtraction never underflows for i32
+                CBOR_MAJOR_NEGATIVE => Ok(-1 - argument as i32),
                 _ => Err(CBORError::DecodingError),
             }
         }
@@ -1407,8 +1233,8 @@ mod cbor_decoder {
             let value = match info {
                 // Workaround-For: https://github.com/cryspen/hax/issues/925
                 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
-                | 18 | 19 | 20 | 21 | 22 | 23 => info.into(),
-                24 => self.read()?.into(),
+                | 18 | 19 | 20 | 21 | 22 | 23 => info as u16,
+                24 => self.read()? as u16,
                 25 => u16::from_be_bytes([self.read()?, self.read()?]),
                 // We do not support those in this function.
                 26 | 27 => return Err(CBORError::DecodingError),
@@ -1426,7 +1252,7 @@ mod cbor_decoder {
         /// Get the raw `i8` or `u8` value.
         pub fn int_raw(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) || (0x20..=0x37).contains(&n) {
+            if n <= 0x17 || n >= 0x20 && n <= 0x37 {
                 Ok(n)
             } else {
                 Err(CBORError::DecodingError)
@@ -1493,10 +1319,10 @@ mod cbor_decoder {
 
         /// Decode a `u8` value into usize.
         pub fn as_usize(&mut self, b: u8) -> Result<usize, CBORError> {
-            if (0..=0x17).contains(&b) {
-                Ok(usize::from(b))
+            if b <= 0x17 {
+                Ok(b as usize)
             } else if 0x18 == b {
-                self.read().map(usize::from)
+                Ok(self.read()? as usize)
             } else {
                 Err(CBORError::DecodingError)
             }
@@ -1509,7 +1335,7 @@ mod cbor_decoder {
 
         /// Get the additionl type info of the given byte (lowest 5 bits).
         pub fn info_of(b: u8) -> u8 {
-            b & 0b000_11111
+            b % 32
         }
 
         /// Check for: an unsigned integer encoded as a single byte
@@ -1557,7 +1383,7 @@ mod cbor_decoder {
                                 .ok_or(CBORError::DecodingError)?;
                         }
                         CBOR_MAJOR_BYTE_STRING | CBOR_MAJOR_TEXT_STRING => {
-                            self.read_slice(argument.into())?;
+                            self.read_slice(argument as usize)?;
                         }
                         CBOR_MAJOR_ARRAY => {
                             remaining_items = remaining_items
@@ -1575,7 +1401,11 @@ mod cbor_decoder {
                 }
             }
 
-            Ok(&self.buf[start..self.position()])
+            // FIXME: we can remove this .ok_or() if we add hax::attributes
+            // that guarantee that self.pos <= self.buf.len()
+            self.buf
+                .get(start..self.position())
+                .ok_or(CBORError::DecodingError)
         }
     }
 }
