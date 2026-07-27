@@ -2,14 +2,16 @@
 
 use lakers_shared::CcmTagLen;
 use lakers_shared::{
-    BytesCcmIvLen, BytesCcmKeyLen, BytesElemLenPSK, BytesHashLen, BytesP256ElemLen,
+    BytesCcmIvLen, BytesCcmKeyLen, BytesElemLenPSK, BytesHashLen, BytesP256ElemLen, BytesSignature,
     Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
 };
 
 use ccm::AeadInPlace;
 use ccm::KeyInit;
+use p256::ecdsa::signature::{Signer, Verifier};
 use p256::elliptic_curve::point::AffineCoordinates;
 use p256::elliptic_curve::point::DecompressPoint;
+use p256::elliptic_curve::subtle::Choice;
 use sha2::Digest;
 
 type AesCcm16_64_128 = ccm::Ccm<aes::Aes128, ccm::consts::U8, ccm::consts::U13>;
@@ -192,6 +194,50 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
 
         (private_key.into(), public_key.into())
     }
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        private_key: &BytesP256ElemLen,
+        message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError> {
+        let signing_key = p256::ecdsa::SigningKey::from_bytes(private_key.into())
+            .map_err(|_| EDHOCError::MissingIdentity)?;
+
+        let signature: p256::ecdsa::Signature = signing_key.sign(message);
+
+        Ok(signature.to_bytes().into())
+    }
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        public_key_x: &BytesP256ElemLen,
+        message: &[u8],
+        signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError> {
+        let Ok(signature) = p256::ecdsa::Signature::from_slice(signature) else {
+            return Ok(false);
+        };
+
+        // the compact representation of the credential omits the y coordinate, so both points
+        // with this x are tried; both belong to the same key holder (private keys d and n-d)
+        for y_is_odd in [0u8, 1u8] {
+            let point = p256::AffinePoint::decompress(public_key_x.into(), Choice::from(y_is_odd));
+            if bool::from(point.is_none()) {
+                continue;
+            }
+            let point = point.unwrap();
+
+            let Ok(verifying_key) = p256::ecdsa::VerifyingKey::from_affine(point) else {
+                continue;
+            };
+
+            if verifying_key.verify(message, &signature).is_ok() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -211,5 +257,68 @@ mod tests {
 
         test_aes_ccm_tag_8::<Crypto<rand_core::OsRng>>(&mut crypto);
         test_aes_ccm_tag_16::<Crypto<rand_core::OsRng>>(&mut crypto);
+    }
+
+    /// Generates a key pair whose public point has the requested y parity.
+    fn key_pair_with_y_parity(
+        crypto: &mut Crypto<rand_core::OsRng>,
+        want_odd_y: bool,
+    ) -> (BytesP256ElemLen, BytesP256ElemLen) {
+        loop {
+            let secret = p256::SecretKey::random(&mut crypto.rng);
+            let public_key = secret.public_key();
+            let point = public_key.as_affine();
+            if bool::from(point.y_is_odd()) == want_odd_y {
+                return (secret.to_bytes().into(), point.x().into());
+            }
+        }
+    }
+
+    #[test]
+    fn test_rustcrypto_ecdsa_roundtrip() {
+        let mut crypto = Crypto::new(rand_core::OsRng);
+        let message = b"the sig_structure to be signed";
+
+        for want_odd_y in [false, true] {
+            let (sk, pk_x) = key_pair_with_y_parity(&mut crypto, want_odd_y);
+
+            let signature = crypto.p256_ecdsa_sign(&sk, message).unwrap();
+            assert!(crypto
+                .p256_ecdsa_verify(&pk_x, message, &signature)
+                .unwrap());
+        }
+    }
+
+    #[test]
+    fn test_rustcrypto_ecdsa_is_deterministic() {
+        let mut crypto = Crypto::new(rand_core::OsRng);
+        let (sk, _) = key_pair_with_y_parity(&mut crypto, false);
+        let message = b"the sig_structure to be signed";
+
+        assert_eq!(
+            crypto.p256_ecdsa_sign(&sk, message).unwrap(),
+            crypto.p256_ecdsa_sign(&sk, message).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_rustcrypto_ecdsa_rejects_bad_signature() {
+        let mut crypto = Crypto::new(rand_core::OsRng);
+        let message = b"the sig_structure to be signed";
+        let (sk, pk_x) = key_pair_with_y_parity(&mut crypto, false);
+        let (_, other_pk_x) = key_pair_with_y_parity(&mut crypto, false);
+
+        let signature = crypto.p256_ecdsa_sign(&sk, message).unwrap();
+
+        assert!(!crypto
+            .p256_ecdsa_verify(&other_pk_x, message, &signature)
+            .unwrap());
+        assert!(!crypto
+            .p256_ecdsa_verify(&pk_x, b"a different message", &signature)
+            .unwrap());
+
+        let mut tampered = signature;
+        tampered[0] ^= 0x01;
+        assert!(!crypto.p256_ecdsa_verify(&pk_x, message, &tampered).unwrap());
     }
 }
