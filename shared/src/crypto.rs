@@ -83,6 +83,23 @@ pub trait Crypto: core::fmt::Debug {
     ) -> BytesP256ElemLen;
     fn get_random_byte(&mut self) -> u8;
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen);
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        _private_key: &BytesP256ElemLen,
+        _message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError> {
+        Err(EDHOCError::UnsupportedMethod)
+    }
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        _public_key_x: &BytesP256ElemLen,
+        _message: &[u8],
+        _signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError> {
+        Err(EDHOCError::UnsupportedMethod)
+    }
 }
 
 /// Trait for valid CCM tag lengths.
