@@ -129,7 +129,7 @@ pub fn r_process_message_1(
         let method = EDHOCMethod::try_from(method)?;
 
         match method {
-            EDHOCMethod::StatStat | EDHOCMethod::PSK => {
+            EDHOCMethod::SigSig | EDHOCMethod::StatStat | EDHOCMethod::PSK => {
                 // Step 2: verify that the selected cipher suite is supported
                 if suites_i[suites_i.len() - 1] == EDHOC_SUPPORTED_SUITES[0] {
                     // hash message_1 and save the hash to the state to avoid saving the whole message
@@ -1855,7 +1855,7 @@ mod tests {
                 IdCred::from_full_value(&ID_CRED_R_TV[..])
                     .unwrap()
                     .as_encoded_value(),
-                &MAC_2_TV,
+                &SignatureOrMac::new(MAC_2_TV),
             )),
             &EadItems::new(),
         )
@@ -2039,7 +2039,7 @@ mod tests {
                 IdCred::from_full_value(&ID_CRED_I_TV[..])
                     .unwrap()
                     .as_encoded_value(),
-                &MAC_3_TV,
+                &SignatureOrMac::new(MAC_3_TV),
             )),
             &EadItems::new(),
         )
