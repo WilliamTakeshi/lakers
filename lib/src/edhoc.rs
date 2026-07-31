@@ -1,16 +1,16 @@
 use crate::InitiatorIdentity;
 use digest::Digest;
 use lakers_shared::{Crypto as CryptoTrait, *};
+mod peer_auth;
 mod psk;
-mod statstat;
 
+use peer_auth::{
+    i_parse_message_2_statstat, i_prepare_message_3_statstat, i_verify_message_2_statstat,
+    r_parse_message_3_statstat, r_prepare_message_2_statstat, r_verify_message_3_statstat,
+};
 use psk::{
     i_parse_message_2_psk, i_prepare_message_3_psk, i_verify_message_2_psk, r_parse_message_3_psk,
     r_parse_message_3_psk_with_cred_resolver, r_prepare_message_2_psk, r_verify_message_3_psk,
-};
-use statstat::{
-    i_parse_message_2_statstat, i_prepare_message_3_statstat, i_verify_message_2_statstat,
-    r_parse_message_3_statstat, r_prepare_message_2_statstat, r_verify_message_3_statstat,
 };
 //FIXME: maybe not the best place to put it. shared/src/lib?
 // Temporary result used by method-specific message_2 preparation before the
