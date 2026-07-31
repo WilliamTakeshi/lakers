@@ -108,12 +108,14 @@ pub struct EdhocResponderDone<Crypto: CryptoTrait> {
 
 #[derive(Debug)]
 pub enum ResponderIdentity {
+    SigSig { sk_r: BytesP256ElemLen },
     StatStat { r: BytesP256ElemLen },
     Psk,
 }
 
 #[derive(Debug)]
 pub enum InitiatorIdentity {
+    SigSig { sk_i: BytesP256ElemLen },
     StatStat { i: BytesP256ElemLen },
     Psk,
 }
@@ -165,6 +167,12 @@ impl<Crypto: CryptoTrait> EdhocResponderProcessedM1<Crypto> {
         };
 
         let method_details = match (self.state.method, &self.r) {
+            (EDHOCMethod::SigSig, ResponderIdentity::SigSig { sk_r }) => {
+                PrepareMessage2Details::SigSig {
+                    sk_r,
+                    cred_transfer,
+                }
+            }
             (EDHOCMethod::StatStat, ResponderIdentity::StatStat { r }) => {
                 PrepareMessage2Details::StatStat { r, cred_transfer }
             }
@@ -415,7 +423,8 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiatorProcessingM2<Crypto> {
         trace!("Enter verify_message_2");
         let i = self.i.ok_or(EDHOCError::MissingIdentity)?;
         let valid_cred_r = match &self.state.method_specifics {
-            ProcessingM2MethodSpecifics::StatStat { id_cred_r, .. } => {
+            ProcessingM2MethodSpecifics::SigSig { id_cred_r, .. }
+            | ProcessingM2MethodSpecifics::StatStat { id_cred_r, .. } => {
                 credential_check_or_fetch(cred_expected, id_cred_r.clone())?
             }
             ProcessingM2MethodSpecifics::Psk {} => {
