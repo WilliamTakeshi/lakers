@@ -68,7 +68,11 @@ impl SignatureOrMac {
     /// `N` must be one of the two lengths RFC 9528 allows for this field: the EDHOC MAC length
     /// of the cipher suite, or the length of a signature. Any other length fails to compile.
     fn new<const N: usize>(value: [u8; N]) -> Self {
-        const { assert!(N == MAC_LENGTH || N == SIGNATURE_LENGTH) }
+        const /* BUT NOT FOR HAX */ {
+            if N != MAC_LENGTH && N != SIGNATURE_LENGTH {
+                panic!("N must be MAC_LENGTH or SIGNATURE_LENGTH")
+            }
+        };
 
         if N == MAC_LENGTH {
             SignatureOrMac::Mac(
