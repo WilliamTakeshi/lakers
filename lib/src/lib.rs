@@ -961,14 +961,16 @@ mod test {
 
         let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
         let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
-        let (_responder, mut message_2) = responder
+        let (_responder, message_2) = responder
             .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
             .unwrap();
 
         // flip the last byte of ciphertext_2, landing inside signature_2 (the field
         // immediately preceding EAD_2, which is absent here)
         let last = message_2.len() - 1;
-        message_2.content[last] ^= 0xff;
+        let mut bytes = message_2.as_slice().to_vec();
+        bytes[last] ^= 0xff;
+        let message_2 = BufferMessage2::new_from_slice(&bytes).unwrap();
 
         let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
         initiator
