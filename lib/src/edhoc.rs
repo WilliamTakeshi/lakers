@@ -279,7 +279,8 @@ pub fn r_verify_message_3(
     valid_cred_i: Credential,
 ) -> Result<(ProcessedM3, BytesHashLen), EDHOCError> {
     let verified = match &state.method_specifics {
-        ProcessingM3MethodSpecifics::SigSig { .. } | ProcessingM3MethodSpecifics::StatStat { .. } => {
+        ProcessingM3MethodSpecifics::SigSig { .. }
+        | ProcessingM3MethodSpecifics::StatStat { .. } => {
             r_verify_message_3_peer_auth(state, crypto, valid_cred_i)?
         }
         ProcessingM3MethodSpecifics::Psk {

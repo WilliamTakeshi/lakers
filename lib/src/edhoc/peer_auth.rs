@@ -2,14 +2,13 @@ use super::{
     compute_mac_2, compute_mac_3, compute_prk_3e2m, compute_prk_4e3m, compute_salt_3e2m,
     compute_salt_4e3m, compute_th_3, compute_th_4, decode_plaintext_2, decode_plaintext_2_sized,
     decode_plaintext_3, decode_plaintext_3_sized, decrypt_message_3, encode_plaintext_2,
-    encode_plaintext_3, encode_sig_structure, encrypt_message_3, BufferMessage3,
-    BufferPlaintext2, BytesHashLen, BytesMac2, BytesMac3, BytesMacSig, ConnId, Credential,
-    CredentialKey, CredentialTransfer, DecodedMessage2, EDHOCError, EDHOCMethod, EadItems,
-    InitiatorIdentity, ParsedMessage2Details, ParsedMessage3, PrepareMessage2Details,
-    PreparedMessage2, PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessingM1,
-    ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics,
-    SignatureOrMac, Th4Input, VerifiedMessage2, VerifiedMessage3, WaitM3, WaitM3MethodSpecifics,
-    SIGNATURE_LENGTH,
+    encode_plaintext_3, encode_sig_structure, encrypt_message_3, BufferMessage3, BufferPlaintext2,
+    BytesHashLen, BytesMac2, BytesMac3, BytesMacSig, ConnId, Credential, CredentialKey,
+    CredentialTransfer, DecodedMessage2, EDHOCError, EDHOCMethod, EadItems, InitiatorIdentity,
+    ParsedMessage2Details, ParsedMessage3, PrepareMessage2Details, PreparedMessage2,
+    PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessingM1, ProcessingM2,
+    ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, SignatureOrMac,
+    Th4Input, VerifiedMessage2, VerifiedMessage3, WaitM3, WaitM3MethodSpecifics, SIGNATURE_LENGTH,
 };
 use lakers_shared::Crypto as CryptoTrait;
 
@@ -432,7 +431,8 @@ pub(crate) fn i_prepare_message_3_peer_auth(
         ProcessedM2MethodSpecifics::Psk { .. } => return Err(EDHOCError::UnsupportedMethod),
     };
 
-    let plaintext_3 = encode_plaintext_3(Some((id_cred_i.as_encoded_value(), &sig_or_mac_3)), ead_3)?;
+    let plaintext_3 =
+        encode_plaintext_3(Some((id_cred_i.as_encoded_value(), &sig_or_mac_3)), ead_3)?;
     let message_3 = encrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3, None)?;
 
     let th_4 = compute_th_4(
