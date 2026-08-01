@@ -11,6 +11,187 @@ use psa_crypto::types::algorithm::{
 };
 use psa_crypto::types::key::{Attributes, EccFamily, Lifetime, Policy, Type, UsageFlags};
 
+/// Minimal modular arithmetic over the NIST P-256 base field, used only to
+/// decompress a peer's x-only public key into the full uncompressed SEC1
+/// point.
+///
+/// This exists because the vendored mbedtls PSA implementation has a
+/// heap-corrupting bug when importing a *compressed* EC public key: it sizes
+/// the key slot buffer from the 33-byte compressed input, then tries to
+/// re-export the key in canonical (65-byte uncompressed) format into that
+/// same undersized buffer. Importing an already-uncompressed point avoids
+/// that path entirely, since import and re-export sizes then match.
+mod p256_field {
+    /// A 256-bit unsigned integer, big-endian: `limbs[0]` is the most
+    /// significant word.
+    type Limbs = [u64; 4];
+
+    const P: Limbs = [
+        0xFFFFFFFF00000001,
+        0x0000000000000000,
+        0x00000000FFFFFFFF,
+        0xFFFFFFFFFFFFFFFF,
+    ];
+    const B: Limbs = [
+        0x5AC635D8AA3A93E7,
+        0xB3EBBD55769886BC,
+        0x651D06B0CC53B0F6,
+        0x3BCE3C3E27D2604B,
+    ];
+
+    fn from_be_bytes(bytes: &[u8; 32]) -> Limbs {
+        let mut limbs = [0u64; 4];
+        for i in 0..4 {
+            limbs[i] = u64::from_be_bytes(bytes[i * 8..i * 8 + 8].try_into().unwrap());
+        }
+        limbs
+    }
+
+    fn to_be_bytes(limbs: &Limbs) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for i in 0..4 {
+            out[i * 8..i * 8 + 8].copy_from_slice(&limbs[i].to_be_bytes());
+        }
+        out
+    }
+
+    fn is_zero(a: &Limbs) -> bool {
+        a.iter().all(|&limb| limb == 0)
+    }
+
+    fn is_ge(a: &Limbs, b: &Limbs) -> bool {
+        for i in 0..4 {
+            if a[i] != b[i] {
+                return a[i] > b[i];
+            }
+        }
+        true
+    }
+
+    fn add_raw(a: &Limbs, b: &Limbs) -> (Limbs, bool) {
+        let mut out = [0u64; 4];
+        let mut carry = 0u128;
+        for i in (0..4).rev() {
+            let sum = a[i] as u128 + b[i] as u128 + carry;
+            out[i] = sum as u64;
+            carry = sum >> 64;
+        }
+        (out, carry != 0)
+    }
+
+    fn sub_raw(a: &Limbs, b: &Limbs) -> (Limbs, bool) {
+        let mut out = [0u64; 4];
+        let mut borrow = 0i128;
+        for i in (0..4).rev() {
+            let diff = a[i] as i128 - b[i] as i128 - borrow;
+            if diff < 0 {
+                out[i] = (diff + (1i128 << 64)) as u64;
+                borrow = 1;
+            } else {
+                out[i] = diff as u64;
+                borrow = 0;
+            }
+        }
+        (out, borrow != 0)
+    }
+
+    fn add_mod(a: &Limbs, b: &Limbs, p: &Limbs) -> Limbs {
+        let (sum, carry) = add_raw(a, b);
+        if carry || is_ge(&sum, p) {
+            sub_raw(&sum, p).0
+        } else {
+            sum
+        }
+    }
+
+    fn sub_mod(a: &Limbs, b: &Limbs, p: &Limbs) -> Limbs {
+        let (diff, borrow) = sub_raw(a, b);
+        if borrow {
+            add_raw(&diff, p).0
+        } else {
+            diff
+        }
+    }
+
+    fn neg_mod(a: &Limbs, p: &Limbs) -> Limbs {
+        if is_zero(a) {
+            [0; 4]
+        } else {
+            sub_raw(p, a).0
+        }
+    }
+
+    /// `i == 0` is the most significant bit.
+    fn bit_at(limbs: &Limbs, i: usize) -> bool {
+        let limb = limbs[i / 64];
+        let shift = 63 - (i % 64);
+        (limb >> shift) & 1 == 1
+    }
+
+    fn mul_mod(a: &Limbs, b: &Limbs, p: &Limbs) -> Limbs {
+        let mut acc = [0u64; 4];
+        for i in 0..256 {
+            acc = add_mod(&acc, &acc, p);
+            if bit_at(b, i) {
+                acc = add_mod(&acc, a, p);
+            }
+        }
+        acc
+    }
+
+    fn pow_mod(base: &Limbs, exp: &Limbs, p: &Limbs) -> Limbs {
+        let mut result: Limbs = [0, 0, 0, 1];
+        for i in 0..256 {
+            result = mul_mod(&result, &result, p);
+            if bit_at(exp, i) {
+                result = mul_mod(&result, base, p);
+            }
+        }
+        result
+    }
+
+    fn shr2(limbs: &Limbs) -> Limbs {
+        [
+            limbs[0] >> 2,
+            (limbs[1] >> 2) | (limbs[0] << 62),
+            (limbs[2] >> 2) | (limbs[1] << 62),
+            (limbs[3] >> 2) | (limbs[2] << 62),
+        ]
+    }
+
+    fn add_one(limbs: &Limbs) -> Limbs {
+        add_raw(limbs, &[0, 0, 0, 1]).0
+    }
+
+    /// Given the x-coordinate of a point claimed to be on the P-256 curve,
+    /// returns its two candidate y-coordinates (in no particular parity
+    /// order), or `None` if `x` is not a valid coordinate on the curve.
+    pub fn decompress_both(x: &[u8; 32]) -> Option<([u8; 32], [u8; 32])> {
+        let xl = from_be_bytes(x);
+        if is_ge(&xl, &P) {
+            return None;
+        }
+
+        // alpha = x^3 - 3x + b (mod p)
+        let x2 = mul_mod(&xl, &xl, &P);
+        let x3 = mul_mod(&x2, &xl, &P);
+        let three_x = add_mod(&add_mod(&xl, &xl, &P), &xl, &P);
+        let alpha = sub_mod(&add_mod(&x3, &B, &P), &three_x, &P);
+
+        // P-256's prime is 3 (mod 4), so a square root of a quadratic
+        // residue `alpha` is alpha^((p+1)/4) mod p.
+        let exp = shr2(&add_one(&P));
+        let y0 = pow_mod(&alpha, &exp, &P);
+
+        if mul_mod(&y0, &y0, &P) != alpha {
+            return None; // x is not a valid curve coordinate
+        }
+
+        let y1 = neg_mod(&y0, &P);
+        Some((to_be_bytes(&y0), to_be_bytes(&y1)))
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn mbedtls_hardware_poll(
     _data: *mut ::core::ffi::c_void,
@@ -325,11 +506,18 @@ impl CryptoTrait for Crypto {
         let hash = self.sha256_digest(message);
 
         // the compact representation of the credential omits the y coordinate, so both points
-        // with this x are tried; both belong to the same key holder (private keys d and n-d)
-        for sign_byte in [0x02u8, 0x03u8] {
-            let mut peer_public_key: [u8; 33] = [0; 33];
-            peer_public_key[0] = sign_byte;
+        // with this x are tried; both belong to the same key holder (private keys d and n-d).
+        // The two candidate y's are decompressed in Rust rather than importing a compressed
+        // point into PSA: the vendored mbedtls mis-sizes the key slot buffer for compressed
+        // points and corrupts the heap when the import is rejected/re-exported.
+        let Some((y_a, y_b)) = p256_field::decompress_both(public_key_x) else {
+            return Ok(false);
+        };
+        for y in [y_a, y_b] {
+            let mut peer_public_key: [u8; 65] = [0; 65];
+            peer_public_key[0] = 0x04;
             peer_public_key[1..33].copy_from_slice(&public_key_x[..]);
+            peer_public_key[33..65].copy_from_slice(&y);
 
             let mut usage_flags: UsageFlags = Default::default();
             usage_flags.set_verify_hash();
@@ -441,6 +629,46 @@ mod tests {
     use lakers_shared::test_helper::{
         test_aes_ccm_roundtrip, test_aes_ccm_tag_16, test_aes_ccm_tag_8,
     };
+
+    /// Cross-checks `p256_field::decompress_both` against real curve points obtained from
+    /// PSA's own key generation + export (which never goes through the buggy compressed-import
+    /// path, so it's trustworthy ground truth here).
+    #[test]
+    fn test_p256_decompress_against_generated_keys() {
+        let alg = RawKeyAgreement::Ecdh;
+        let mut usage_flags: UsageFlags = UsageFlags::default();
+        usage_flags.set_export();
+        usage_flags.set_derive();
+        let attributes = Attributes {
+            key_type: Type::EccKeyPair {
+                curve_family: EccFamily::SecpR1,
+            },
+            bits: 256,
+            lifetime: Lifetime::Volatile,
+            policy: Policy {
+                usage_flags,
+                permitted_algorithms: KeyAgreement::Raw(alg).into(),
+            },
+        };
+
+        psa_crypto::init().unwrap();
+        for _ in 0..8 {
+            let key_id = key_management::generate(attributes, None).unwrap();
+            let mut public_key: [u8; 65] = [0; 65];
+            key_management::export_public(key_id, &mut public_key).unwrap();
+            unsafe { key_management::destroy(key_id).unwrap() };
+
+            assert_eq!(public_key[0], 0x04);
+            let x: [u8; 32] = public_key[1..33].try_into().unwrap();
+            let y: [u8; 32] = public_key[33..65].try_into().unwrap();
+
+            let (y0, y1) = p256_field::decompress_both(&x).expect("x is a valid curve coordinate");
+            assert!(
+                y == y0 || y == y1,
+                "decompressed y matches neither candidate"
+            );
+        }
+    }
 
     #[test]
     fn test_hmac_sha256() {
