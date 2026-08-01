@@ -133,15 +133,18 @@ impl CryptoTrait for Crypto {
             .unwrap();
 
         #[allow(deprecated, reason = "using extend_reserve")]
-        aead::encrypt(
+        let result = aead::encrypt(
             my_key,
             alg,
             iv,
             ad,
             plaintext,
             &mut output_buffer.content[full_range],
-        )
-        .unwrap();
+        );
+        // SAFETY: The function demands that the Id is not used while destroyed.
+        // We did not hand out the Id `my_key` in the last few lines, so we can destroy it.
+        unsafe { key_management::destroy(my_key).unwrap() };
+        result.unwrap();
 
         output_buffer
     }
@@ -178,14 +181,19 @@ impl CryptoTrait for Crypto {
             .unwrap();
 
         #[allow(deprecated, reason = "using extend_reserve")]
-        match aead::decrypt(
+        let result = aead::decrypt(
             my_key,
             alg,
             iv,
             ad,
             ciphertext,
             &mut output_buffer.content[out_slice],
-        ) {
+        );
+        // SAFETY: The function demands that the Id is not used while destroyed.
+        // We did not hand out the Id `my_key` in the last few lines, so we can destroy it.
+        unsafe { key_management::destroy(my_key).unwrap() };
+
+        match result {
             Ok(_) => Ok(output_buffer),
             Err(_) => Err(EDHOCError::MacVerificationFailed),
         }
@@ -260,6 +268,10 @@ impl CryptoTrait for Crypto {
         let mut public_key: [u8; P256_ELEM_LEN * 2 + 1] = [0; P256_ELEM_LEN * 2 + 1]; // allocate buffer for: sign, x, and y coordinates
         key_management::export_public(key_id, &mut public_key).unwrap();
         let public_key: [u8; P256_ELEM_LEN] = public_key[1..33].try_into().unwrap(); // return only the x coordinate
+
+        // SAFETY: The function demands that the Id is not used while destroyed.
+        // We did not hand out the Id `key_id` in the last few lines, so we can destroy it.
+        unsafe { key_management::destroy(key_id).unwrap() };
 
         (private_key, public_key)
     }
