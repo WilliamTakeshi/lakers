@@ -27,6 +27,7 @@ hexlit = "0.5.3"
 default = [ "test-ead-none" ]
 test-ead-none = [ ]
 test-ead-authz = [ ]
+large_buffers = [ "lakers-shared/large_buffers" ]
 defmt = ["dep:defmt"]
 log = ["dep:log"]
 
