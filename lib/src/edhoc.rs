@@ -48,6 +48,12 @@ struct VerifiedMessage2 {
     prk_4e3m: BytesHashLen,
     th_3: BytesHashLen,
 }
+
+#[derive(Debug)]
+struct VerifiedPeerMessage2 {
+    prk_3e2m: BytesHashLen,
+    th_3: BytesHashLen,
+}
 #[derive(Debug)]
 struct PreparedMessage3 {
     message_3: BufferMessage3,

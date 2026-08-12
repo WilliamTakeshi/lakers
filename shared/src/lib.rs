@@ -552,6 +552,15 @@ pub enum WaitM3MethodSpecifics {
     StaticDh {},
     Psk { cred_r: Credential },
 }
+
+impl From<AuthMethod> for WaitM3MethodSpecifics {
+    fn from(initiator_auth: AuthMethod) -> Self {
+        match initiator_auth {
+            AuthMethod::Signature => WaitM3MethodSpecifics::Signature {},
+            AuthMethod::StaticDh => WaitM3MethodSpecifics::StaticDh {},
+        }
+    }
+}
 #[derive(Debug)]
 pub struct WaitM3 {
     pub method_specifics: WaitM3MethodSpecifics,

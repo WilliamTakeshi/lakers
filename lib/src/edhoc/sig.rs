@@ -4,12 +4,12 @@ use crate::edhoc::encode_sig_structure;
 
 use super::{
     compute_mac_2, compute_mac_3, compute_th_3, compute_th_4, decrypt_message_3,
-    encode_plaintext_2, encode_plaintext_3, encrypt_message_3, BufferMessage3, BufferPlaintext2,
-    BytesHashLen, BytesP256ElemLen, ConnId, Credential, CredentialKey, CredentialTransfer,
-    Crypto as CryptoTrait, DecodedMessage2, EDHOCError, EadItems, IdCred, ParsedMessage2Details,
-    ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics,
-    ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, Th4Input,
-    VerifiedMessage2, VerifiedMessage3, WaitM3, WaitM3MethodSpecifics,
+    encode_plaintext_2, encode_plaintext_3, encrypt_message_3, AuthMethod, BufferMessage3,
+    BufferPlaintext2, BytesHashLen, BytesP256ElemLen, ConnId, Credential, CredentialKey,
+    CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2, EDHOCError, EadItems, IdCred,
+    ParsedMessage2Details, ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2,
+    ProcessedM2MethodSpecifics, ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3,
+    ProcessingM3MethodSpecifics, Th4Input, VerifiedMessage3, VerifiedPeerMessage2, WaitM3,
 };
 
 pub(crate) fn r_prepare_message_2_sig(
@@ -21,6 +21,7 @@ pub(crate) fn r_prepare_message_2_sig(
     ead_2: &EadItems,
     th_2: &BytesHashLen,
     prk_2e: &BytesHashLen,
+    initiator_auth: AuthMethod,
 ) -> Result<PreparedMessage2, EDHOCError> {
     // no static ECDH: PRK_3e2m is PRK_2e directly
     let prk_3e2m = *prk_2e;
@@ -64,7 +65,7 @@ pub(crate) fn r_prepare_message_2_sig(
         plaintext_2,
         prk_3e2m,
         th_3,
-        method_specifics: WaitM3MethodSpecifics::SigSig {},
+        method_specifics: initiator_auth.into(),
     })
 }
 
@@ -77,7 +78,7 @@ pub(crate) fn r_parse_message_3_sig(
 
     let (id_cred_i, signature_3, ead_3) = decode_plaintext_3_sig(&plaintext_3)?;
     Ok(ParsedMessage3 {
-        method_specifics: ProcessingM3MethodSpecifics::SigSig {
+        method_specifics: ProcessingM3MethodSpecifics::Signature {
             signature_3,
             id_cred_i: id_cred_i.clone(),
         },
@@ -144,12 +145,12 @@ pub(crate) fn i_parse_message_2_sig(
 ) -> Result<DecodedMessage2, EDHOCError> {
     let (c_r, id_cred_r, signature_2, ead_2) = decode_plaintext_2_sig(plaintext_2)?;
     Ok(DecodedMessage2 {
-        method_specifics: ProcessingM2MethodSpecifics::SigSig {
+        method_specifics: ProcessingM2MethodSpecifics::Signature {
             signature_2,
             id_cred_r: id_cred_r.clone(),
         },
         c_r,
-        parsed_details: ParsedMessage2Details::SigSig { id_cred_r },
+        parsed_details: ParsedMessage2Details::Signature { id_cred_r },
         ead_2,
     })
 }
@@ -158,8 +159,7 @@ pub(crate) fn i_verify_message_2_sig(
     state: &ProcessingM2,
     crypto: &mut impl CryptoTrait,
     valid_cred_r: Credential,
-    i: BytesP256ElemLen,
-) -> Result<VerifiedMessage2, EDHOCError> {
+) -> Result<VerifiedPeerMessage2, EDHOCError> {
     let public_key = match valid_cred_r.key {
         CredentialKey::EC2Compact(public_key) => public_key,
         // FIXME: the error is not accurate. It is a lack of agreement between peers.
@@ -167,7 +167,7 @@ pub(crate) fn i_verify_message_2_sig(
     };
 
     let (id_cred_r, signature_2) = match &state.method_specifics {
-        ProcessingM2MethodSpecifics::SigSig {
+        ProcessingM2MethodSpecifics::Signature {
             id_cred_r,
             signature_2,
         } => (id_cred_r, signature_2),
@@ -207,17 +207,8 @@ pub(crate) fn i_verify_message_2_sig(
             &state.plaintext_2,
             Some(valid_cred_r.bytes.as_slice()),
         );
-        // no static ECDH: PRK_4e3m is PRK_3e2m directly
-        let prk_4e3m = prk_3e2m;
 
-        Ok(VerifiedMessage2 {
-            // the initiator's signing key is needed again when producing Signature_or_MAC_3
-            method_specifics: ProcessedM2MethodSpecifics::SigSig { i },
-            // method_specifics: ProcessedM2MethodSpecifics::SigSig { i: i.clone() },
-            prk_3e2m,
-            prk_4e3m,
-            th_3,
-        })
+        Ok(VerifiedPeerMessage2 { prk_3e2m, th_3 })
     } else {
         Err(EDHOCError::MacVerificationFailed)
     }
@@ -235,7 +226,7 @@ pub(crate) fn i_prepare_message_3_sig(
         CredentialTransfer::ByReference => cred_i.by_kid()?,
     };
 
-    let ProcessedM2MethodSpecifics::SigSig { i } = &state.method_specifics else {
+    let ProcessedM2MethodSpecifics::Signature { i } = &state.method_specifics else {
         return Err(EDHOCError::UnsupportedMethod);
     };
 
