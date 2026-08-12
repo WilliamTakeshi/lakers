@@ -127,7 +127,11 @@ pub fn r_process_message_1(
         let method = EDHOCMethod::try_from(method)?;
 
         match method {
-            EDHOCMethod::SigSig | EDHOCMethod::StatStat | EDHOCMethod::PSK => {
+            EDHOCMethod::SigSig
+            | EDHOCMethod::SigStat
+            | EDHOCMethod::StatSig
+            | EDHOCMethod::StatStat
+            | EDHOCMethod::PSK => {
                 // Step 2: verify that the selected cipher suite is supported
                 if suites_i[suites_i.len() - 1] == EDHOC_SUPPORTED_SUITES[0] {
                     // hash message_1 and save the hash to the state to avoid saving the whole message
@@ -167,24 +171,45 @@ pub fn r_prepare_message_2(
     let th_2 = compute_th_2(crypto, &state.g_y, &state.h_message_1);
     let prk_2e = compute_prk_2e(crypto, &state.y, &state.g_x, &th_2);
 
-    let prepared = match (state.method, method_details) {
-        (EDHOCMethod::SigSig, PrepareMessage2Details::SigSig { r, cred_transfer }) => {
-            r_prepare_message_2_sig(crypto, cred_r, r, c_r, cred_transfer, ead_2, &th_2, &prk_2e)?
-        }
-        (EDHOCMethod::StatStat, PrepareMessage2Details::StatStat { r, cred_transfer }) => {
-            r_prepare_message_2_stat(
-                state,
-                crypto,
-                cred_r,
-                r,
-                c_r,
-                cred_transfer,
-                ead_2,
-                &th_2,
-                &prk_2e,
-            )?
-        }
-        (EDHOCMethod::PSK, PrepareMessage2Details::Psk) => {
+    // Signature_or_MAC_2 and PRK_3e2m follow the responder's authentication method,
+    // while the initiator's decides whether message_3 will carry MAC_3 or signature_3.
+    let prepared = match (
+        state.method.responder_auth(),
+        state.method.initiator_auth(),
+        method_details,
+    ) {
+        (
+            Some(AuthMethod::Signature),
+            Some(initiator_auth),
+            PrepareMessage2Details::Signature { r, cred_transfer },
+        ) => r_prepare_message_2_sig(
+            crypto,
+            cred_r,
+            r,
+            c_r,
+            cred_transfer,
+            ead_2,
+            &th_2,
+            &prk_2e,
+            initiator_auth,
+        )?,
+        (
+            Some(AuthMethod::StaticDh),
+            Some(initiator_auth),
+            PrepareMessage2Details::StaticDh { r, cred_transfer },
+        ) => r_prepare_message_2_stat(
+            state,
+            crypto,
+            cred_r,
+            r,
+            c_r,
+            cred_transfer,
+            ead_2,
+            &th_2,
+            &prk_2e,
+            initiator_auth,
+        )?,
+        (None, None, PrepareMessage2Details::Psk) => {
             r_prepare_message_2_psk(crypto, cred_r, c_r, ead_2, &th_2, &prk_2e)?
         }
         _ => return Err(EDHOCError::UnsupportedMethod),
@@ -216,8 +241,8 @@ pub fn r_parse_message_3(
     message_3: &BufferMessage3,
 ) -> Result<(ProcessingM3, IdCred, EadItems), EDHOCError> {
     let parsed = match &state.method_specifics {
-        WaitM3MethodSpecifics::SigSig {} => r_parse_message_3_sig(state, crypto, message_3)?,
-        WaitM3MethodSpecifics::StatStat {} => r_parse_message_3_stat(state, crypto, message_3)?,
+        WaitM3MethodSpecifics::Signature {} => r_parse_message_3_sig(state, crypto, message_3)?,
+        WaitM3MethodSpecifics::StaticDh {} => r_parse_message_3_stat(state, crypto, message_3)?,
         WaitM3MethodSpecifics::Psk { cred_r } => {
             r_parse_message_3_psk(state, crypto, message_3, cred_r)?
         }
@@ -247,8 +272,8 @@ where
     F: Fn(&IdCred) -> Result<Credential, EDHOCError>,
 {
     let parsed = match &state.method_specifics {
-        WaitM3MethodSpecifics::SigSig {} => r_parse_message_3_sig(state, crypto, message_3)?,
-        WaitM3MethodSpecifics::StatStat {} => r_parse_message_3_stat(state, crypto, message_3)?,
+        WaitM3MethodSpecifics::Signature {} => r_parse_message_3_sig(state, crypto, message_3)?,
+        WaitM3MethodSpecifics::StaticDh {} => r_parse_message_3_stat(state, crypto, message_3)?,
         WaitM3MethodSpecifics::Psk { cred_r } => r_parse_message_3_psk_with_cred_resolver(
             state,
             crypto,
@@ -278,11 +303,11 @@ pub fn r_verify_message_3(
     valid_cred_i: Credential,
 ) -> Result<(ProcessedM3, BytesHashLen), EDHOCError> {
     let verified = match &state.method_specifics {
-        ProcessingM3MethodSpecifics::SigSig {
+        ProcessingM3MethodSpecifics::Signature {
             signature_3,
             id_cred_i,
         } => r_verify_message_3_sig(state, crypto, valid_cred_i, signature_3, id_cred_i)?,
-        ProcessingM3MethodSpecifics::StatStat { mac_3, id_cred_i } => {
+        ProcessingM3MethodSpecifics::StaticDh { mac_3, id_cred_i } => {
             let salt_4e3m = compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3);
             r_verify_message_3_stat(state, crypto, valid_cred_i, *mac_3, id_cred_i, &salt_4e3m)?
         }
@@ -375,11 +400,13 @@ pub fn i_parse_message_2<'a>(
     let prk_2e = compute_prk_2e(crypto, &state.x, &g_y, &th_2);
     let plaintext_2 = encrypt_decrypt_ciphertext_2(crypto, &prk_2e, &th_2, &ciphertext_2);
 
-    let decoded = match state.method {
-        EDHOCMethod::SigSig => i_parse_message_2_sig(&plaintext_2),
-        EDHOCMethod::StatStat => i_parse_message_2_stat(&plaintext_2),
-        EDHOCMethod::PSK => i_parse_message_2_psk(&plaintext_2),
-        _ => Err(EDHOCError::UnsupportedMethod),
+    // whether Signature_or_MAC_2 is a signature or a MAC depends on how the responder
+    // authenticates, which methods 1 and 2 decouple from the initiator's choice
+    let decoded = match state.method.responder_auth() {
+        Some(AuthMethod::Signature) => i_parse_message_2_sig(&plaintext_2),
+        Some(AuthMethod::StaticDh) => i_parse_message_2_stat(&plaintext_2),
+        None if state.method == EDHOCMethod::PSK => i_parse_message_2_psk(&plaintext_2),
+        None => Err(EDHOCError::UnsupportedMethod),
     }?;
 
     Ok((
@@ -405,29 +432,54 @@ pub fn i_verify_message_2(
     valid_cred_r: Credential,
     i: InitiatorIdentity, // I's static private DH key when required by method
 ) -> Result<ProcessedM2, EDHOCError> {
-    // The overall verification flow is shared across methods, but `prk_3e2m`,
-    // `th_3`, and `prk_4e3m` still depend on the EDHOC method, so the match keeps
-    // the method-specific derivation in the child modules and only shares the final
-    // `ProcessedM2` assembly here.
-    let verified = match (&state.method_specifics, &i) {
-        (ProcessingM2MethodSpecifics::SigSig { .. }, InitiatorIdentity::SigSig { i }) => {
-            i_verify_message_2_sig(state, crypto, valid_cred_r, *i)?
-        }
-        (ProcessingM2MethodSpecifics::StatStat { .. }, InitiatorIdentity::StatStat { i }) => {
-            i_verify_message_2_stat(state, crypto, valid_cred_r, i)?
-        }
+    // Verifying Signature_or_MAC_2 and deriving PRK_3e2m and TH_3 depends on how the
+    // responder authenticates; PRK_4e3m and the way message_3 will be authenticated
+    // depend on the initiator instead. Methods 1 and 2 combine the two independently,
+    // so the two axes are resolved one after the other rather than as one pair.
+    let peer_verified = match (&state.method_specifics, &i) {
         (ProcessingM2MethodSpecifics::Psk { .. }, InitiatorIdentity::Psk) => {
-            i_verify_message_2_psk(state, crypto, valid_cred_r)?
+            let verified = i_verify_message_2_psk(state, crypto, valid_cred_r)?;
+            return Ok(ProcessedM2 {
+                method_specifics: verified.method_specifics,
+                prk_3e2m: verified.prk_3e2m,
+                prk_4e3m: verified.prk_4e3m,
+                th_3: verified.th_3,
+            });
+        }
+        (ProcessingM2MethodSpecifics::Signature { .. }, _) => {
+            i_verify_message_2_sig(state, crypto, valid_cred_r)?
+        }
+        (ProcessingM2MethodSpecifics::StaticDh { .. }, _) => {
+            i_verify_message_2_stat(state, crypto, valid_cred_r)?
         }
         // FIXME: it is not an error, but more a lack of agreement between peers.
         _ => return Err(EDHOCError::MissingIdentity), // or UnsupportedMethod
     };
 
+    let VerifiedPeerMessage2 { prk_3e2m, th_3 } = peer_verified;
+
+    let (prk_4e3m, method_specifics) = match &i {
+        // no static ECDH: PRK_4e3m is PRK_3e2m directly, and the initiator's signing
+        // key is needed again when producing Signature_or_MAC_3
+        InitiatorIdentity::Signature { i } => {
+            (prk_3e2m, ProcessedM2MethodSpecifics::Signature { i: *i })
+        }
+        InitiatorIdentity::StaticDh { i } => {
+            let salt_4e3m = compute_salt_4e3m(crypto, &prk_3e2m, &th_3);
+            (
+                compute_prk_4e3m(crypto, &salt_4e3m, i, &state.g_y),
+                ProcessedM2MethodSpecifics::StaticDh {},
+            )
+        }
+        // FIXME: it is not an error, but more a lack of agreement between peers.
+        InitiatorIdentity::Psk => return Err(EDHOCError::MissingIdentity),
+    };
+
     Ok(ProcessedM2 {
-        method_specifics: verified.method_specifics,
-        prk_3e2m: verified.prk_3e2m,
-        prk_4e3m: verified.prk_4e3m,
-        th_3: verified.th_3,
+        method_specifics,
+        prk_3e2m,
+        prk_4e3m,
+        th_3,
     })
 }
 
@@ -439,10 +491,10 @@ pub fn i_prepare_message_3(
     ead_3: &EadItems,
 ) -> Result<(WaitM4, BufferMessage3, BytesHashLen), EDHOCError> {
     let prepared = match state.method_specifics {
-        ProcessedM2MethodSpecifics::SigSig { .. } => {
+        ProcessedM2MethodSpecifics::Signature { .. } => {
             i_prepare_message_3_sig(state, crypto, cred_i, cred_transfer, ead_3)?
         }
-        ProcessedM2MethodSpecifics::StatStat { .. } => {
+        ProcessedM2MethodSpecifics::StaticDh { .. } => {
             i_prepare_message_3_stat(state, crypto, cred_i, cred_transfer, ead_3)?
         }
         ProcessedM2MethodSpecifics::Psk { .. } => {
