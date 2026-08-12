@@ -374,6 +374,8 @@ impl ConnId {
 #[non_exhaustive]
 pub enum EDHOCMethod {
     SigSig = 0,
+    SigStat = 1,
+    StatSig = 2,
     StatStat = 3,
     PSK = 4,
 }
@@ -384,6 +386,8 @@ impl TryFrom<u8> for EDHOCMethod {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(EDHOCMethod::SigSig),
+            1 => Ok(EDHOCMethod::SigStat),
+            2 => Ok(EDHOCMethod::StatSig),
             3 => Ok(EDHOCMethod::StatStat),
             4 => Ok(EDHOCMethod::PSK),
             _ => Err(EDHOCError::UnsupportedMethod),
@@ -394,6 +398,31 @@ impl TryFrom<u8> for EDHOCMethod {
 impl From<EDHOCMethod> for u8 {
     fn from(method: EDHOCMethod) -> u8 {
         method as u8
+    }
+}
+
+#[derive(PartialEq, Debug, Copy, Clone)]
+#[repr(C)]
+pub enum AuthMethod {
+    Signature,
+    StaticDh,
+}
+
+impl EDHOCMethod {
+    pub fn initiator_auth(&self) -> Option<AuthMethod> {
+        match self {
+            EDHOCMethod::SigSig | EDHOCMethod::SigStat => Some(AuthMethod::Signature),
+            EDHOCMethod::StatSig | EDHOCMethod::StatStat => Some(AuthMethod::StaticDh),
+            EDHOCMethod::PSK => None,
+        }
+    }
+
+    pub fn responder_auth(&self) -> Option<AuthMethod> {
+        match self {
+            EDHOCMethod::SigSig | EDHOCMethod::StatSig => Some(AuthMethod::Signature),
+            EDHOCMethod::SigStat | EDHOCMethod::StatStat => Some(AuthMethod::StaticDh),
+            EDHOCMethod::PSK => None,
+        }
     }
 }
 
@@ -519,8 +548,8 @@ pub struct WaitM2 {
 }
 #[derive(Debug)]
 pub enum WaitM3MethodSpecifics {
-    SigSig {},
-    StatStat {},
+    Signature {},
+    StaticDh {},
     Psk { cred_r: Credential },
 }
 #[derive(Debug)]
@@ -534,11 +563,11 @@ pub struct WaitM3 {
 /// Method-specific details required to prepare EDHOC message_2.
 #[derive(Copy, Clone, Debug)]
 pub enum PrepareMessage2Details<'a> {
-    SigSig {
+    Signature {
         r: &'a BytesP256ElemLen,
         cred_transfer: CredentialTransfer,
     },
-    StatStat {
+    StaticDh {
         r: &'a BytesP256ElemLen,
         cred_transfer: CredentialTransfer,
     },
@@ -548,11 +577,11 @@ pub enum PrepareMessage2Details<'a> {
 #[derive(Debug)]
 #[repr(C)]
 pub enum ProcessingM2MethodSpecifics {
-    SigSig {
+    Signature {
         signature_2: BytesSignature,
         id_cred_r: IdCred,
     },
-    StatStat {
+    StaticDh {
         mac_2: BytesMac2,
         id_cred_r: IdCred,
     },
@@ -573,16 +602,16 @@ pub struct ProcessingM2 {
 
 #[derive(Debug)]
 pub enum ParsedMessage2Details {
-    SigSig { id_cred_r: IdCred },
-    StatStat { id_cred_r: IdCred },
+    Signature { id_cred_r: IdCred },
+    StaticDh { id_cred_r: IdCred },
     Psk {},
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub enum ProcessedM2MethodSpecifics {
-    SigSig { i: BytesP256ElemLen },
-    StatStat {},
+    Signature { i: BytesP256ElemLen },
+    StaticDh {},
     Psk { cred_r: Credential },
 }
 
@@ -596,11 +625,11 @@ pub struct ProcessedM2 {
 }
 #[derive(Debug)]
 pub enum ProcessingM3MethodSpecifics {
-    SigSig {
+    Signature {
         signature_3: BytesSignature,
         id_cred_i: IdCred,
     },
-    StatStat {
+    StaticDh {
         mac_3: BytesMac3,
         id_cred_i: IdCred,
     },
