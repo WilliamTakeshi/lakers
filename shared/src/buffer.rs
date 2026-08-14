@@ -8,7 +8,6 @@ pub const MAX_SUITES_LEN: usize = 9;
 /// hax are happy with.
 ///
 /// This is a dedicated function because it's tricky to convince hax of it being OK.
-#[hax_lib::requires(short.len() <= long.len())]
 // Inlining because this gets optimized into register shuffling and then a call to memcpy, provided
 // that the assert gets optimized out (that's usually clear from the context) and short is not
 // 0-long (IIUC that's because empty slices may point to NULL in Rust, but memcpy'ing 0 bytes from
@@ -18,26 +17,8 @@ const fn copy_into_longer(long: &mut [u8], short: &[u8]) {
     // So the compiler knows what hax knows
     assert!(short.len() <= long.len());
     let mut cursor = short.len();
-    let _original_length = long.len();
     while cursor > 0 {
-        hax_lib::loop_decreases!(cursor);
-        // Even though short.len() <= long.len() is a precondition (and thus
-        // `assert!(short.len() <= long.len());` should hold throughout the loop),
-        // from hax's PoV, `long` changes all the time as a whole, becoming an array --
-        // with the 2nd clause of the loop invariant, we can tell it to convince itself
-        // that indeed the cursor doesn't go out of it.
-        //
-        // Forcing it to convince itself that the length stays the same is not just relevant for
-        // the loop (where the assignment would fail otherwise), but also for later where the
-        // function is used: Only with this, the "returned" version of long will even "fit" in the
-        // slot where it was taken from under hax' move-calling pattern.
-        hax_lib::loop_invariant!(cursor <= short.len() && long.len() == _original_length);
         cursor = cursor - 1;
-        // If you find yourself wondering why the original length trick is needed, put in this
-        // assert and observe how it does or does not trigger during typechecking depending on
-        // whether the assignment to long[cursor] happens (looping without assigning is always
-        // fine) and which invariants are required.
-        //assert!(short.len() <= long.len());
         long[cursor] = short[cursor];
     }
 }
@@ -56,13 +37,10 @@ pub enum EdhocBufferError {
 // NOTE: how would this const generic thing work across the C and Python bindings?
 #[derive(PartialEq, Debug, Clone)]
 #[repr(C)]
-// `#[hax_lib::attributes]` is not usable here due to https://github.com/cryspen/hax/issues/899
 pub struct EdhocBuffer<const N: usize> {
     #[deprecated]
     pub content: [u8; N],
     #[deprecated(note = "use .len()")]
-    // `#[hax_lib::refine(len <= N)]` would allow dropping all the other hax_lib requires lines on
-    // functions.
     len: usize,
 }
 
@@ -77,7 +55,6 @@ impl<const N: usize> Default for EdhocBuffer<N> {
 }
 
 #[allow(deprecated)]
-#[hax_lib::attributes]
 impl<const N: usize> EdhocBuffer<N> {
     pub const fn new() -> Self {
         EdhocBuffer {
@@ -94,7 +71,6 @@ impl<const N: usize> EdhocBuffer<N> {
         N
     }
 
-    #[hax_lib::ensures(|result| result.is_ok() == (slice.len() <= N))]
     pub const fn new_from_slice(slice: &[u8]) -> Result<Self, EdhocBufferError> {
         let mut buffer = Self::new();
         if buffer.fill_with_slice(slice).is_ok() {
@@ -122,9 +98,8 @@ impl<const N: usize> EdhocBuffer<N> {
     /// # use lakers_shared::*;
     /// const MY_CONST: EdhocMessageBuffer = EdhocMessageBuffer::new_from_array(&[0; 10_000]);
     /// ```
-    #[hax_lib::requires(AN <= N)]
     pub const fn new_from_array<const AN: usize>(input: &[u8; AN]) -> Self {
-        const /* BUT NOT FOR HAX */ {
+        const {
             if AN > N {
                 panic!("Array exceeds buffer size")
             }
@@ -135,7 +110,6 @@ impl<const N: usize> EdhocBuffer<N> {
         }
     }
 
-    #[hax_lib::requires(self.len <= N)]
     pub fn contains(&self, item: &u8) -> bool {
         self.as_slice().contains(item)
     }
@@ -151,10 +125,7 @@ impl<const N: usize> EdhocBuffer<N> {
         }
     }
 
-    #[hax_lib::requires(self.len <= N)]
     pub fn get_slice(&self, start: usize, len: usize) -> Option<&[u8]> {
-        // The strict criterion avoids the need to use checked / saturating addition, which is not
-        // present in hax for usize.
         if start >= usize::MAX / 2 || len >= usize::MAX / 2 {
             return None;
         }
@@ -167,12 +138,10 @@ impl<const N: usize> EdhocBuffer<N> {
     }
 
     #[inline]
-    #[hax_lib::requires(self.len <= N)]
     pub fn as_slice(&self) -> &[u8] {
         &self.content[0..self.len]
     }
 
-    #[hax_lib::ensures(|result| result.is_ok() == (slice.len() <= N))]
     pub const fn fill_with_slice(&mut self, slice: &[u8]) -> Result<(), EdhocBufferError> {
         if slice.len() <= self.content.len() {
             copy_into_longer(&mut self.content, slice);
@@ -230,12 +199,10 @@ impl<const N: usize> EdhocBuffer<N> {
     }
 }
 
-#[hax_lib::attributes]
 #[allow(deprecated)]
 impl<const N: usize> Index<usize> for EdhocBuffer<N> {
     type Output = u8;
     #[track_caller]
-    #[hax_lib::requires(item < self.len && self.len <= N)]
     fn index(&self, item: usize) -> &Self::Output {
         &self.as_slice()[item]
     }
