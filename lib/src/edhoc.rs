@@ -851,6 +851,40 @@ fn encode_sig_structure(
     Ok(sig_structure)
 }
 
+/// Decodes a definite-length CBOR byte string header, returning `(payload_length,
+/// header_length)`.
+///
+/// Rejects any other CBOR type, a header truncated by the end of the buffer, and a payload
+/// length that runs past the end of the buffer.
+fn decode_bstr_header(buf: &[u8]) -> Result<(usize, usize), EDHOCError> {
+    if buf.is_empty() {
+        return Err(EDHOCError::ParsingError);
+    }
+
+    let (len, header_length) =
+        if buf[0] >= CBOR_MAJOR_BYTE_STRING && buf[0] <= CBOR_MAJOR_BYTE_STRING_MAX {
+            ((buf[0] - CBOR_MAJOR_BYTE_STRING) as usize, 1)
+        } else if buf[0] == CBOR_BYTE_STRING {
+            if buf.len() < 2 {
+                return Err(EDHOCError::ParsingError);
+            }
+            (buf[1] as usize, 2)
+        } else if buf[0] == CBOR_BYTE_STRING_2BYTE_LEN {
+            if buf.len() < 3 {
+                return Err(EDHOCError::ParsingError);
+            }
+            (((buf[1] as usize) << 8) | (buf[2] as usize), 3)
+        } else {
+            return Err(EDHOCError::ParsingError);
+        };
+
+    if buf.len() < header_length + len {
+        return Err(EDHOCError::ParsingError);
+    }
+
+    Ok((len, header_length))
+}
+
 fn encode_bstr_header<const N: usize>(
     buf: &mut EdhocBuffer<N>,
     len: usize,
@@ -912,26 +946,12 @@ fn encrypt_message_3(
 ) -> Result<BufferMessage3, EDHOCError> {
     let mut output: BufferMessage3 = BufferMessage3::new();
     let bytestring_length = plaintext_3.len() + AES_CCM_TAG_LEN;
-    // FIXME: Reuse CBOR encoder
-    if bytestring_length < 24 {
-        output
-            .push(CBOR_MAJOR_BYTE_STRING | (bytestring_length) as u8)
-            .map_err(|_| EDHOCError::EncodingError)?;
-    } else {
-        // FIXME: Assumes we don't exceed 256 bytes which is the current buffer size
-        output
-            .push(CBOR_MAJOR_BYTE_STRING | 24)
-            .map_err(|_| EDHOCError::EncodingError)?;
-        output
-            .push(bytestring_length as _)
-            .map_err(|_| EDHOCError::EncodingError)?;
-    };
 
-    // FIXME: Make the function fallible, especially with the prospect of algorithm agility
-    assert!(
-        output.len() + bytestring_length <= MAX_MESSAGE_SIZE_LEN,
-        "Tried to encode a message that is too large."
-    );
+    encode_bstr_header(&mut output, bytestring_length)?;
+
+    if output.len() + bytestring_length > MAX_MESSAGE_SIZE_LEN {
+        return Err(EDHOCError::EncodingError);
+    }
 
     let external_aad = build_external_aad(th_3, psk_fields)?;
     let enc_structure = encode_enc_structure(external_aad.as_slice())?;
@@ -959,19 +979,16 @@ fn decrypt_message_3(
     message_3: &BufferMessage3,
     psk_fields: Option<(&[u8], &[u8], &[u8])>,
 ) -> Result<BufferPlaintext3, EDHOCError> {
-    // decode message_3
-    // FIXME: Reuse CBOR decoder
-    let (bytestring_length, prefix_length) =
-        if (0..=23).contains(&(message_3[0] ^ CBOR_MAJOR_BYTE_STRING)) {
-            ((message_3[0] ^ CBOR_MAJOR_BYTE_STRING).into(), 1)
-        } else {
-            (message_3[1].into(), 2)
-        };
+    let (bytestring_length, prefix_length) = decode_bstr_header(message_3.as_slice())?;
+
+    if bytestring_length < AES_CCM_TAG_LEN {
+        return Err(EDHOCError::ParsingError);
+    }
 
     let ciphertext_3: BufferCiphertext3 = BufferCiphertext3::new_from_slice(
-        &message_3.as_slice()[prefix_length..][..bytestring_length],
+        &message_3.as_slice()[prefix_length..prefix_length + bytestring_length],
     )
-    .unwrap();
+    .map_err(|_| EDHOCError::ParsingError)?;
 
     let (k_3, iv_3) = compute_k_3_iv_3(crypto, prk_3e2m, th_3);
     let external_aad = build_external_aad(th_3, psk_fields)?;
@@ -993,21 +1010,12 @@ fn encrypt_message_4(
 ) -> Result<BufferMessage4, EDHOCError> {
     let mut output: BufferMessage4 = BufferMessage4::new();
     let bytestring_length = plaintext_4.len() + AES_CCM_TAG_LEN;
-    // FIXME: Reuse CBOR encoder
-    if bytestring_length < 24 {
-        output
-            .push(CBOR_MAJOR_BYTE_STRING | (bytestring_length) as u8)
-            .map_err(|_| EDHOCError::EncodingError)?;
-    } else {
-        // FIXME: Assumes we don't exceed 256 bytes which is the current buffer size
-        output
-            .push(CBOR_MAJOR_BYTE_STRING | 24)
-            .map_err(|_| EDHOCError::EncodingError)?;
-        output
-            .push(bytestring_length as _)
-            .map_err(|_| EDHOCError::EncodingError)?;
-    };
-    // FIXME: Make the function fallible, especially with the prospect of algorithm agility
+
+    encode_bstr_header(&mut output, bytestring_length)?;
+
+    if output.len() + bytestring_length > MAX_MESSAGE_SIZE_LEN {
+        return Err(EDHOCError::EncodingError);
+    }
 
     let enc_structure = encode_enc_structure(th_4)?;
 
@@ -1034,19 +1042,16 @@ fn decrypt_message_4(
     th_4: &BytesHashLen,
     message_4: &BufferMessage4,
 ) -> Result<BufferPlaintext4, EDHOCError> {
-    // decode message_4
-    // FIXME: Reuse CBOR decoder
-    let (bytestring_length, prefix_length) =
-        if (0..=23).contains(&(message_4[0] ^ CBOR_MAJOR_BYTE_STRING)) {
-            ((message_4[0] ^ CBOR_MAJOR_BYTE_STRING).into(), 1)
-        } else {
-            (message_4[1].into(), 2)
-        };
+    let (bytestring_length, prefix_length) = decode_bstr_header(message_4.as_slice())?;
+
+    if bytestring_length < AES_CCM_TAG_LEN {
+        return Err(EDHOCError::ParsingError);
+    }
 
     let ciphertext_4 = BufferCiphertext4::new_from_slice(
-        &message_4.as_slice()[prefix_length..][..bytestring_length],
+        &message_4.as_slice()[prefix_length..prefix_length + bytestring_length],
     )
-    .unwrap();
+    .map_err(|_| EDHOCError::ParsingError)?;
 
     let (k_4, iv_4) = compute_k_4_iv_4(crypto, prk_4e3m, th_4);
 
@@ -1879,6 +1884,74 @@ mod tests {
         );
         assert!(plaintext_3.is_ok());
         assert_eq!(plaintext_3.unwrap(), PLAINTEXT_3_TV);
+    }
+
+    /// A malformed message_3 must be reported as a parsing error rather than panicking. Before
+    /// the header was decoded properly, each of these either indexed out of bounds, sliced past
+    /// the end of the buffer, or reached the AEAD with a ciphertext shorter than the tag.
+    #[test]
+    fn test_decrypt_message_3_malformed_header_returns_error() {
+        let cases: [&[u8]; 5] = [
+            &[],                        // empty
+            &[0x58],                    // one-byte length header, length missing
+            &[0x59, 0x01],              // two-byte length header, second length byte missing
+            &[0x58, 0xff, 0xaa, 0xbb],  // length runs past the end of the buffer
+            &[0x43, 0xaa, 0xbb, 0xcc],  // valid bstr, but shorter than the AEAD tag
+        ];
+
+        for case in cases {
+            let message_3 = BufferMessage3::new_from_slice(case).unwrap();
+            let res = decrypt_message_3(
+                &mut default_crypto(),
+                &PRK_3E2M_TV,
+                &TH_3_TV,
+                &message_3,
+                None,
+            );
+            assert_eq!(res, Err(EDHOCError::ParsingError), "case {:02x?}", case);
+        }
+    }
+
+    /// A message_3 whose ciphertext exceeds 255 bytes needs a two-byte CBOR length header. The
+    /// old encoder truncated the length into a single byte, and the old decoder assumed a
+    /// two-byte header without checking, so the pair round-tripped only below 256 bytes.
+    ///
+    /// Only reachable when the buffers are large enough, so this runs on the `large-buffers` CI
+    /// leg and is skipped otherwise.
+    #[test]
+    fn test_encrypt_decrypt_message_3_two_byte_length() {
+        const PLAINTEXT_LEN: usize = 256;
+
+        if MAX_MESSAGE_SIZE_LEN < PLAINTEXT_LEN + AES_CCM_TAG_LEN + 3 {
+            return;
+        }
+
+        let plaintext_3 = BufferPlaintext3::new_from_slice(&[0x5a; PLAINTEXT_LEN]).unwrap();
+        let message_3 = encrypt_message_3(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &plaintext_3,
+            None,
+        )
+        .unwrap();
+
+        let payload_len = PLAINTEXT_LEN + AES_CCM_TAG_LEN;
+        assert_eq!(message_3.len(), payload_len + 3);
+        assert_eq!(
+            &message_3.as_slice()[..3],
+            &[0x59, (payload_len >> 8) as u8, payload_len as u8]
+        );
+
+        let roundtrip = decrypt_message_3(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &message_3,
+            None,
+        )
+        .unwrap();
+        assert_eq!(roundtrip, plaintext_3);
     }
 
     #[test]
