@@ -47,7 +47,17 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> core::fmt::Debug for Crypto
 
 impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng> {
     fn supported_suites(&self) -> EdhocBuffer<MAX_SUITES_LEN> {
-        EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[EDHOCSuite::CipherSuite2 as u8])
+        #[cfg(not(feature = "pq"))]
+        let suites = [EDHOCSuite::CipherSuite2 as u8];
+        // This is the only backend with ML-KEM and ML-DSA, so it is the only one that can
+        // advertise the post-quantum suite.
+        #[cfg(feature = "pq")]
+        let suites = [
+            EDHOCSuite::CipherSuite2 as u8,
+            EDHOCSuite::PqCipherSuite as u8,
+        ];
+
+        EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&suites)
             .expect("This should never fail, as the slice is of the correct length")
     }
 

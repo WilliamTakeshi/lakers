@@ -485,6 +485,23 @@ pub enum EDHOCSuite {
     CipherSuite2 = 2,
     // add others, such as:
     // CiherSuite3 = 3,
+    /// Provisional post-quantum suite: ML-KEM-512, ML-DSA-44, AES-CCM-16-128-128, SHA-256.
+    ///
+    /// **Locally chosen and not interoperable.** `draft-spm-lake-pqsuites` has not been
+    /// assigned code points -- its suites are still `TBD1`/`TBD2` -- so there is nothing to
+    /// conform to yet (gap D6). 60 is currently unassigned in the IANA EDHOC Cipher Suites
+    /// registry and sits in its 24-65535 "Specification Required" range, which is where a real
+    /// registration for this would come from.
+    ///
+    /// Not in the registry's Private Use range, which for cipher suites is only -24 to -21:
+    /// suite values are handled as `u8` throughout (`parse_suites_i`, `encode_message_1`,
+    /// `EdhocBuffer<MAX_SUITES_LEN>`), so a negative code point would mean re-typing the whole
+    /// suite path. Out of scope for the prototype.
+    ///
+    /// Also note this suite uses SHA-256, where pqsuites selects SHAKE256. Both are 32-byte
+    /// outputs so nothing downstream changes; see the hash row in `pq_edhoc_section3.md`.
+    #[cfg(feature = "pq")]
+    PqCipherSuite = 60,
 }
 
 impl From<EDHOCSuite> for u8 {

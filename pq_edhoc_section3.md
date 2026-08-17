@@ -357,6 +357,25 @@ message.
 (ML-KEM-512 + ML-DSA-44 at NIST level 1/2, per pqsuites' apparent direction) so sizes are
 derivable while the registration is pending.
 
+The lakers prototype squats on **60**, currently unassigned, for
+`ML-KEM-512 + ML-DSA-44 + AES-CCM-16-128-128 + SHA-256`. Two notes on that choice, since the
+registry ranges are easy to get wrong:
+
+- The IANA EDHOC Cipher Suites registry allocates **-65536..-25** Specification Required,
+  **-24..-21** Private Use, **-20..23** Standards Action with Expert Review, and
+  **24..65535** Specification Required. So the Private Use range is only four values, all
+  negative, and 60 is in the range a real registration for this would come from.
+- A negative code point would be the standards-correct choice for an unregistered
+  experiment, but suite values are handled as `u8` end to end in lakers — `parse_suites_i`,
+  `encode_message_1`, `EdhocBuffer<MAX_SUITES_LEN>` — so it would mean re-typing the whole
+  suite path. Deliberately out of scope for the prototype.
+
+Unrelated to PQ but found while implementing this: lakers encoded a single `SUITES_I` value
+of exactly 24 as a bare `0x18`, which is the CBOR "one length byte follows" header rather than
+the value 24, so the decoder consumed the next byte as the suite. Suites 24 and 25 are both
+assigned, so this was reachable by any implementation supporting either. Fixed, with a
+round-trip test across the 23/24/25 boundary.
+
 ### D7 — no CBOR encodings, no CDDL, no test vectors · **B**
 
 Nothing states how `kem.pk_eph`, `kem.ct_eph`, `kem.ct_R` and `kem.ct_I` are wrapped, whether
@@ -540,7 +559,7 @@ resolution proposed above.
 | §3.5 `PRK_out`            | contradictory                            | from `PRK_4e3m`                         | D1 |
 | §3.2 `K_4`/`IV_4`         | undefined                                | from `PRK_4e3m` = `PRK_3e2m`, labels 8/9 | D9 |
 | METHOD code points        | none                                     | 40–43, marked TBD                       | D5 |
-| Cipher suite              | none                                     | one locally-chosen suite, marked TBD    | D6 |
+| Cipher suite              | none                                     | 60, locally chosen, marked TBD          | D6 |
 | Hash                      | SHAKE256 (via pqsuites)                  | **SHA-256**                             | prototype scope; both are 32-byte outputs so the key schedule and all sizes are unaffected. A deliberate, documented divergence. |
 | CBOR encodings            | none                                     | as in D7                                | D7 |
 | Two-key credential        | none                                     | one AKP COSE_Key, `-1` sig / `-2` KEM   | D8 |

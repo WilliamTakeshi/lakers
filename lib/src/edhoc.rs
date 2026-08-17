@@ -144,8 +144,16 @@ pub fn r_process_message_1(
             | EDHOCMethod::SigStat
             | EDHOCMethod::StatSig
             | EDHOCMethod::PSK => {
-                // Step 2: verify that the selected cipher suite is supported
-                if suites_i[suites_i.len() - 1] == EDHOC_SUPPORTED_SUITES[0] {
+                // Step 2: verify that the selected cipher suite is supported.
+                //
+                // This asks the backend rather than comparing against the EDHOC_SUPPORTED_SUITES
+                // constant: the constant is a single hardcoded entry, so a backend supporting
+                // anything else -- as the rustcrypto one does once `pq` is on -- would have had
+                // its selection rejected here.
+                if crypto
+                    .supported_suites()
+                    .contains(&suites_i[suites_i.len() - 1])
+                {
                     // hash message_1 and save the hash to the state to avoid saving the whole message
                     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
                     Ok((
@@ -561,9 +569,13 @@ fn encode_message_1(
 
     output.push(method.into()).unwrap(); // CBOR unsigned int less than 24 is encoded verbatim
 
+    // A CBOR unsigned int is encoded verbatim only up to 23; 24 (`CBOR_UINT_1BYTE`) is itself
+    // the "one length byte follows" header. The comparison used to be `<=`, which encoded
+    // suite 24 as a bare 0x18 and left the decoder reading the next byte as the value. Suites
+    // 24 and 25 are both assigned, so this was reachable as soon as either was supported.
     if suites.len() == 1 {
         // only one suite, will be encoded as a single integer
-        if suites[0] <= CBOR_UINT_1BYTE {
+        if suites[0] < CBOR_UINT_1BYTE {
             output.push(suites[0]).unwrap();
         } else {
             output.push(CBOR_UINT_1BYTE).unwrap();
@@ -575,7 +587,7 @@ fn encode_message_1(
             .push(CBOR_MAJOR_ARRAY + (suites.len() as u8))
             .unwrap();
         for &suite in suites.as_slice().iter() {
-            if suite <= CBOR_UINT_1BYTE {
+            if suite < CBOR_UINT_1BYTE {
                 output.push(suite).unwrap();
             } else {
                 output.push(CBOR_UINT_1BYTE).unwrap();
@@ -2003,6 +2015,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(roundtrip, plaintext_3);
+    }
+
+    /// Suite 24 is assigned (A256GCM with P-384 and ES384) and encodes as `0x18 0x18`: 24 is
+    /// itself the CBOR "one length byte follows" header, so it cannot be written verbatim. The
+    /// boundary used to be `<=`, which emitted a bare `0x18` and left the decoder consuming the
+    /// following byte as the suite value.
+    #[test]
+    fn test_encode_message_1_suite_boundary() {
+        for (suite, expected) in [
+            (23u8, vec![0x17u8]),
+            (24u8, vec![0x18, 0x18]),
+            (25u8, vec![0x18, 0x19]),
+            (60u8, vec![0x18, 0x3c]),
+        ] {
+            let suites = EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[suite]).unwrap();
+            let message_1 = encode_message_1(
+                EDHOCMethod::StatStat,
+                &suites,
+                &G_X_TV,
+                C_I_TV,
+                &EadItems::new(),
+            )
+            .unwrap();
+
+            // METHOD is one byte, then SUITES_I.
+            assert_eq!(&message_1.as_slice()[1..1 + expected.len()], &expected[..]);
+
+            let (_method, parsed, _g_x, _c_i, _ead) = parse_message_1(&message_1).unwrap();
+            assert_eq!(
+                parsed.as_slice(),
+                &[suite],
+                "suite {suite} did not round-trip"
+            );
+        }
     }
 
     /// draft-spm-lake-pqsuites selects AES-CCM-16-128-128, a 16-byte tag, where suite 2 uses

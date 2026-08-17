@@ -1329,6 +1329,45 @@ mod test {
         assert_eq!(err, EDHOCError::ParsingError);
     }
 
+    /// The rustcrypto backend advertises the provisional post-quantum suite once `pq` is on,
+    /// and a responder must accept a message_1 selecting it. Before the responder consulted
+    /// `crypto.supported_suites()` it compared against the single hardcoded
+    /// `EDHOC_SUPPORTED_SUITES[0]`, so any suite but 2 was rejected regardless of the backend.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_suite_is_negotiable() {
+        use lakers_shared::EDHOCSuite;
+
+        let cred_r = Credential::parse_ccs(CRED_R.try_into().unwrap()).unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::StatStat,
+            EDHOCSuite::PqCipherSuite,
+        );
+        assert_eq!(
+            initiator.selected_cipher_suite(),
+            EDHOCSuite::PqCipherSuite as u8
+        );
+
+        let (_initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+
+        // SUITES_I is a single suite above 23, so it takes the two-byte encoding.
+        assert_eq!(&message_1.as_slice()[1..3], &[0x18, 60]);
+
+        let responder = EdhocResponder::new(
+            default_crypto(),
+            ResponderIdentity::StaticDh {
+                r: R.try_into().expect("Wrong length of responder private key"),
+            },
+            cred_r,
+        );
+        responder
+            .process_message_1(&message_1)
+            .expect("the backend advertises this suite, so it must be accepted");
+    }
+
     /// The PSK path above rejected an empty message_3 already; the sig and stat paths reach
     /// `decrypt_message_3` instead and used to panic there on the unchecked header read.
     #[cfg(feature = "test-ead-none")]
