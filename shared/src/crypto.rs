@@ -96,6 +96,55 @@ pub trait Crypto: core::fmt::Debug {
         _message: &[u8],
         _signature: &BytesSignature,
     ) -> Result<bool, EDHOCError>;
+
+    /// Generate an ML-KEM-512 key pair, returned as `(decapsulation_key, encapsulation_key)`
+    /// to match [`Self::p256_generate_key_pair`]'s private-then-public order.
+    ///
+    /// # Optional method
+    ///
+    /// Unlike every other method on this trait, the three `kem_*` methods have a default body
+    /// returning [`EDHOCError::UnsupportedCipherSuite`]. This is a deliberate departure from the
+    /// convention the ECDSA methods set, where all three backends implement the operation for
+    /// real. It is done because neither the PSA nor the CryptoCell310 backend has ML-KEM
+    /// available at all, so there is nothing for them to delegate to, and a required method
+    /// would force them to carry stub bodies that say the same thing less clearly.
+    ///
+    /// A backend that does not override these cannot take part in a post-quantum EDHOC
+    /// exchange; it will fail at the first KEM operation rather than at suite negotiation.
+    #[cfg(feature = "pq")]
+    fn kem_generate_key_pair(
+        &mut self,
+    ) -> Result<(BytesKemDecapsKey, BytesKemEncapsKey), EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
+
+    /// Encapsulate to an ML-KEM-512 encapsulation key, returning `(shared_secret, ciphertext)`.
+    ///
+    /// See [`Self::kem_generate_key_pair`] for why this has a default body.
+    #[cfg(feature = "pq")]
+    fn kem_encapsulate(
+        &mut self,
+        _encaps_key: &BytesKemEncapsKey,
+    ) -> Result<(BytesKemSharedSecret, BytesKemCiphertext), EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
+
+    /// Decapsulate an ML-KEM-512 ciphertext.
+    ///
+    /// ML-KEM uses implicit rejection: a malformed or attacker-chosen ciphertext yields a
+    /// *pseudorandom shared secret*, not an error. Callers must not treat a successful return as
+    /// evidence that the ciphertext was genuine — that only follows once a MAC or AEAD keyed by
+    /// the resulting secret verifies.
+    ///
+    /// See [`Self::kem_generate_key_pair`] for why this has a default body.
+    #[cfg(feature = "pq")]
+    fn kem_decapsulate(
+        &mut self,
+        _decaps_key: &BytesKemDecapsKey,
+        _ciphertext: &BytesKemCiphertext,
+    ) -> Result<BytesKemSharedSecret, EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
 }
 
 /// Trait for valid CCM tag lengths.
@@ -310,5 +359,66 @@ pub mod test_helper {
         assert!(!crypto
             .p256_ecdsa_verify(&PK_X_Y_EVEN, SIG_MESSAGE, &[0u8; SIGNATURE_LENGTH])
             .expect("verification should succeed"));
+    }
+
+    /// Encapsulating to a freshly generated key and decapsulating with its counterpart must
+    /// agree, and two encapsulations to the same key must differ (encapsulation is randomised).
+    #[cfg(feature = "pq")]
+    pub fn test_mlkem_roundtrip<C: Crypto>(crypto: &mut C) {
+        let (dk, ek) = crypto
+            .kem_generate_key_pair()
+            .expect("key generation should succeed");
+
+        let (ss_enc, ct) = crypto
+            .kem_encapsulate(&ek)
+            .expect("encapsulation should succeed");
+        let ss_dec = crypto
+            .kem_decapsulate(&dk, &ct)
+            .expect("decapsulation should succeed");
+
+        assert_eq!(ss_enc, ss_dec, "shared secrets must agree");
+        assert_ne!(ss_enc, [0u8; ML_KEM_SHARED_SECRET_LEN]);
+
+        let (ss_again, ct_again) = crypto
+            .kem_encapsulate(&ek)
+            .expect("encapsulation should succeed");
+        assert_ne!(ct, ct_again, "encapsulation must be randomised");
+        assert_ne!(ss_enc, ss_again, "encapsulation must be randomised");
+
+        let (other_dk, _) = crypto
+            .kem_generate_key_pair()
+            .expect("key generation should succeed");
+        assert_ne!(dk, other_dk, "key generation must be randomised");
+    }
+
+    /// ML-KEM decapsulation uses *implicit rejection*: a corrupted ciphertext yields a
+    /// pseudorandom shared secret rather than an error.
+    ///
+    /// This is the property that makes error handling in PQ-EDHOC different from RFC 9528 —
+    /// a bad ciphertext cannot be detected where it is decapsulated, only later when a MAC or
+    /// AEAD keyed by the result fails. A backend that returns an error here would be wrong, and
+    /// would make the protocol code above it wrong too.
+    #[cfg(feature = "pq")]
+    pub fn test_mlkem_implicit_rejection<C: Crypto>(crypto: &mut C) {
+        let (dk, ek) = crypto
+            .kem_generate_key_pair()
+            .expect("key generation should succeed");
+        let (ss, ct) = crypto
+            .kem_encapsulate(&ek)
+            .expect("encapsulation should succeed");
+
+        for byte in [0usize, ML_KEM_CIPHERTEXT_LEN / 2, ML_KEM_CIPHERTEXT_LEN - 1] {
+            let mut tampered = ct;
+            tampered[byte] ^= 0x01;
+
+            let ss_bad = crypto
+                .kem_decapsulate(&dk, &tampered)
+                .expect("decapsulation must not fail on a corrupted ciphertext");
+
+            assert_ne!(
+                ss, ss_bad,
+                "implicit rejection must yield a different secret"
+            );
+        }
     }
 }

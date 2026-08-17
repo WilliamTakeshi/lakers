@@ -4,6 +4,10 @@ use lakers_shared::{
     BytesCcmIvLen, BytesCcmKeyLen, BytesElemLenPSK, BytesHashLen, BytesP256ElemLen,
     Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
 };
+#[cfg(feature = "pq")]
+use lakers_shared::{
+    BytesKemCiphertext, BytesKemDecapsKey, BytesKemEncapsKey, BytesKemSharedSecret,
+};
 use lakers_shared::{BytesSignature, CcmTagLen};
 
 use ccm::AeadInPlace;
@@ -238,6 +242,51 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
 
         Ok(false)
     }
+
+    #[cfg(feature = "pq")]
+    fn kem_generate_key_pair(
+        &mut self,
+    ) -> Result<(BytesKemDecapsKey, BytesKemEncapsKey), EDHOCError> {
+        let mut seed = [0u8; libcrux_ml_kem::KEY_GENERATION_SEED_SIZE];
+        self.rng.fill_bytes(&mut seed);
+
+        let key_pair = libcrux_ml_kem::mlkem512::portable::generate_key_pair(seed);
+
+        Ok((*key_pair.sk(), *key_pair.pk()))
+    }
+
+    #[cfg(feature = "pq")]
+    fn kem_encapsulate(
+        &mut self,
+        encaps_key: &BytesKemEncapsKey,
+    ) -> Result<(BytesKemSharedSecret, BytesKemCiphertext), EDHOCError> {
+        let mut randomness = [0u8; libcrux_ml_kem::ENCAPS_SEED_SIZE];
+        self.rng.fill_bytes(&mut randomness);
+
+        let encaps_key = libcrux_ml_kem::mlkem512::MlKem512PublicKey::from(*encaps_key);
+        let (ciphertext, shared_secret) =
+            libcrux_ml_kem::mlkem512::portable::encapsulate(&encaps_key, randomness);
+
+        Ok((shared_secret, *ciphertext.as_slice()))
+    }
+
+    #[cfg(feature = "pq")]
+    fn kem_decapsulate(
+        &mut self,
+        decaps_key: &BytesKemDecapsKey,
+        ciphertext: &BytesKemCiphertext,
+    ) -> Result<BytesKemSharedSecret, EDHOCError> {
+        let decaps_key = libcrux_ml_kem::mlkem512::MlKem512PrivateKey::from(*decaps_key);
+        let ciphertext = libcrux_ml_kem::mlkem512::MlKem512Ciphertext::from(*ciphertext);
+
+        // Infallible by construction: ML-KEM uses implicit rejection, so a bad ciphertext
+        // returns a pseudorandom secret rather than an error. The Result is for backends that
+        // cannot perform the operation at all.
+        Ok(libcrux_ml_kem::mlkem512::portable::decapsulate(
+            &decaps_key,
+            &ciphertext,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -249,6 +298,16 @@ mod tests {
     use lakers_shared::{CcmTagLen16, CcmTagLen8};
 
     use super::*;
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_rustcrypto_mlkem() {
+        use lakers_shared::test_helper::{test_mlkem_implicit_rejection, test_mlkem_roundtrip};
+
+        let mut crypto = Crypto::new(rand_core::OsRng);
+        test_mlkem_roundtrip::<Crypto<rand_core::OsRng>>(&mut crypto);
+        test_mlkem_implicit_rejection::<Crypto<rand_core::OsRng>>(&mut crypto);
+    }
 
     #[test]
     fn test_rustcrypto_aes_ccm() {

@@ -68,6 +68,25 @@ pub const MAC_LENGTH_3: usize = MAC_LENGTH_2;
 pub const MAC_LENGTH_SIG: usize = SHA256_DIGEST_LEN;
 pub const SIGNATURE_LENGTH: usize = 64; // r + s
 pub const VOUCHER_LEN: usize = MAC_LENGTH;
+
+/// ML-KEM-512 sizes, per FIPS 203.
+///
+/// The parameter set follows draft-spm-lake-pqsuites, which selects NIST level 1/2. These are
+/// fixed by the suite rather than negotiable, which is why they are plain constants.
+#[cfg(feature = "pq")]
+pub const ML_KEM_ENCAPS_KEY_LEN: usize = 800;
+#[cfg(feature = "pq")]
+pub const ML_KEM_DECAPS_KEY_LEN: usize = 1632;
+#[cfg(feature = "pq")]
+pub const ML_KEM_CIPHERTEXT_LEN: usize = 768;
+/// An ML-KEM shared secret is 32 bytes for every parameter set, which happens to match
+/// [`P256_ELEM_LEN`]. That is what lets `hkdf_extract` be reused unchanged for `PRK_2e`,
+/// `PRK_3e2m` and `PRK_4e3m` -- see the assertion below.
+#[cfg(feature = "pq")]
+pub const ML_KEM_SHARED_SECRET_LEN: usize = 32;
+
+#[cfg(feature = "pq")]
+const _: () = assert!(ML_KEM_SHARED_SECRET_LEN == P256_ELEM_LEN);
 pub const MAX_EAD_ITEMS: usize = 4;
 
 // maximum supported length of connection identifier for R
@@ -214,6 +233,14 @@ pub type BufferCiphertext3 = EdhocMessageBuffer;
 pub type BufferCiphertext4 = EdhocMessageBuffer;
 pub type BytesHashLen = [u8; SHA256_DIGEST_LEN];
 pub type BytesP256ElemLen = [u8; P256_ELEM_LEN];
+#[cfg(feature = "pq")]
+pub type BytesKemEncapsKey = [u8; ML_KEM_ENCAPS_KEY_LEN];
+#[cfg(feature = "pq")]
+pub type BytesKemDecapsKey = [u8; ML_KEM_DECAPS_KEY_LEN];
+#[cfg(feature = "pq")]
+pub type BytesKemCiphertext = [u8; ML_KEM_CIPHERTEXT_LEN];
+#[cfg(feature = "pq")]
+pub type BytesKemSharedSecret = [u8; ML_KEM_SHARED_SECRET_LEN];
 pub type BytesElemLenPSK = [u8; ELEM_LEN_PSK];
 pub type BufferMessage2 = EdhocMessageBuffer;
 /// Generic buffer type (soft-deprecated).
