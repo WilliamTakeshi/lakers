@@ -69,6 +69,10 @@ struct VerifiedMessage3 {
 enum SignatureOrMac {
     Mac(BytesMac),
     Signature(BytesSignature),
+    /// An ML-DSA-44 signature. At 2420 bytes this dominates the size of the enum, which is why
+    /// the variant is feature-gated rather than always present.
+    #[cfg(feature = "pq")]
+    PqSignature(BytesPqSignature),
 }
 
 impl SignatureOrMac {
@@ -76,6 +80,8 @@ impl SignatureOrMac {
         match self {
             SignatureOrMac::Mac(mac) => mac.as_slice(),
             SignatureOrMac::Signature(signature) => signature.as_slice(),
+            #[cfg(feature = "pq")]
+            SignatureOrMac::PqSignature(signature) => signature.as_slice(),
         }
     }
 }
@@ -88,6 +94,12 @@ impl From<BytesMac> for SignatureOrMac {
 impl From<BytesSignature> for SignatureOrMac {
     fn from(value: BytesSignature) -> Self {
         SignatureOrMac::Signature(value)
+    }
+}
+#[cfg(feature = "pq")]
+impl From<BytesPqSignature> for SignatureOrMac {
+    fn from(value: BytesPqSignature) -> Self {
+        SignatureOrMac::PqSignature(value)
     }
 }
 
@@ -2230,6 +2242,48 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plaintext_3, PLAINTEXT_3_TV);
+    }
+
+    /// The point of adding a second signature width rather than widening `SIGNATURE_LENGTH`:
+    /// `encode_plaintext_2` / `encode_plaintext_3` and the const-generic decoders carry a
+    /// 2420-byte ML-DSA signature with no new code path, because the width was already a type
+    /// parameter and the encoders already go through `encode_bstr_header`.
+    ///
+    /// Needs `pq_buffers` for the plaintext to fit; skipped otherwise.
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_plaintext_roundtrip_at_pq_signature_width() {
+        if MAX_MESSAGE_SIZE_LEN < PQ_SIGNATURE_LENGTH + 64 {
+            return;
+        }
+
+        let mut signature = [0u8; PQ_SIGNATURE_LENGTH];
+        for (i, byte) in signature.iter_mut().enumerate() {
+            *byte = (i % 251) as u8;
+        }
+
+        let id_cred_i = IdCred::from_full_value(&ID_CRED_I_TV[..]).unwrap();
+        let plaintext_3 = encode_plaintext_3(
+            Some((id_cred_i.as_encoded_value(), &signature.into())),
+            &EadItems::new(),
+        )
+        .unwrap();
+        let (decoded_id_cred, decoded_sig, _ead) = decode_plaintext_3_pqsig(&plaintext_3).unwrap();
+        assert_eq!(decoded_id_cred, id_cred_i);
+        assert_eq!(decoded_sig, signature);
+
+        let id_cred_r = IdCred::from_full_value(&ID_CRED_R_TV[..]).unwrap();
+        let plaintext_2 = encode_plaintext_2(
+            C_R_TV,
+            Some((id_cred_r.as_encoded_value(), &signature.into())),
+            &EadItems::new(),
+        )
+        .unwrap();
+        let (decoded_c_r, decoded_id_cred, decoded_sig, _ead) =
+            decode_plaintext_2_pqsig(&plaintext_2).unwrap();
+        assert_eq!(decoded_c_r, C_R_TV);
+        assert_eq!(decoded_id_cred, id_cred_r);
+        assert_eq!(decoded_sig, signature);
     }
 
     #[test]

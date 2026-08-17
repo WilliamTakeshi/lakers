@@ -145,6 +145,47 @@ pub trait Crypto: core::fmt::Debug {
     ) -> Result<BytesKemSharedSecret, EDHOCError> {
         Err(EDHOCError::UnsupportedCipherSuite)
     }
+
+    /// Generate an ML-DSA-44 key pair, returned as `(signing_key, verification_key)`.
+    ///
+    /// See [`Self::kem_generate_key_pair`] for why this has a default body.
+    #[cfg(feature = "pq")]
+    fn mldsa_generate_key_pair(
+        &mut self,
+    ) -> Result<(BytesPqSignKey, BytesPqVerifyKey), EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
+
+    /// Sign with ML-DSA-44.
+    ///
+    /// Unlike [`Self::p256_ecdsa_sign`], which is deterministic per RFC 6979, this is
+    /// randomised: signing the same message twice yields different signatures.
+    ///
+    /// See [`Self::kem_generate_key_pair`] for why this has a default body.
+    #[cfg(feature = "pq")]
+    fn mldsa_sign(
+        &mut self,
+        _signing_key: &BytesPqSignKey,
+        _message: &[u8],
+    ) -> Result<BytesPqSignature, EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
+
+    /// Verify an ML-DSA-44 signature.
+    ///
+    /// Returns `Ok(false)` for a signature that is well-formed but does not verify, matching
+    /// [`Self::p256_ecdsa_verify`]. `Err` means the backend cannot perform the operation.
+    ///
+    /// See [`Self::kem_generate_key_pair`] for why this has a default body.
+    #[cfg(feature = "pq")]
+    fn mldsa_verify(
+        &mut self,
+        _verify_key: &BytesPqVerifyKey,
+        _message: &[u8],
+        _signature: &BytesPqSignature,
+    ) -> Result<bool, EDHOCError> {
+        Err(EDHOCError::UnsupportedCipherSuite)
+    }
 }
 
 /// Trait for valid CCM tag lengths.
@@ -420,5 +461,83 @@ pub mod test_helper {
                 "implicit rejection must yield a different secret"
             );
         }
+    }
+
+    #[cfg(feature = "pq")]
+    const PQ_SIG_MESSAGE: &[u8] = b"the sig_structure to be signed";
+
+    #[cfg(feature = "pq")]
+    pub fn test_mldsa_roundtrip<C: Crypto>(crypto: &mut C) {
+        let (sk, pk) = crypto
+            .mldsa_generate_key_pair()
+            .expect("key generation should succeed");
+
+        let signature = crypto
+            .mldsa_sign(&sk, PQ_SIG_MESSAGE)
+            .expect("signing should succeed");
+
+        assert!(crypto
+            .mldsa_verify(&pk, PQ_SIG_MESSAGE, &signature)
+            .expect("verification should succeed"));
+    }
+
+    /// ML-DSA signing is randomised (hedged), where `p256_ecdsa_sign` is deterministic per
+    /// RFC 6979. Two signatures over the same message must differ, and both must verify.
+    #[cfg(feature = "pq")]
+    pub fn test_mldsa_is_randomised<C: Crypto>(crypto: &mut C) {
+        let (sk, pk) = crypto
+            .mldsa_generate_key_pair()
+            .expect("key generation should succeed");
+
+        let first = crypto
+            .mldsa_sign(&sk, PQ_SIG_MESSAGE)
+            .expect("signing should succeed");
+        let second = crypto
+            .mldsa_sign(&sk, PQ_SIG_MESSAGE)
+            .expect("signing should succeed");
+
+        assert_ne!(first, second, "ML-DSA signing must be randomised");
+        assert!(crypto
+            .mldsa_verify(&pk, PQ_SIG_MESSAGE, &first)
+            .expect("verification should succeed"));
+        assert!(crypto
+            .mldsa_verify(&pk, PQ_SIG_MESSAGE, &second)
+            .expect("verification should succeed"));
+    }
+
+    /// Every rejection must be reported as `Ok(false)`, never `Err`: `Err` is reserved for a
+    /// backend that cannot perform the operation at all.
+    #[cfg(feature = "pq")]
+    pub fn test_mldsa_rejects_bad_signature<C: Crypto>(crypto: &mut C) {
+        let (sk, pk) = crypto
+            .mldsa_generate_key_pair()
+            .expect("key generation should succeed");
+        let (_, other_pk) = crypto
+            .mldsa_generate_key_pair()
+            .expect("key generation should succeed");
+
+        let signature = crypto
+            .mldsa_sign(&sk, PQ_SIG_MESSAGE)
+            .expect("signing should succeed");
+
+        assert!(!crypto
+            .mldsa_verify(&other_pk, PQ_SIG_MESSAGE, &signature)
+            .expect("verification should succeed"));
+
+        assert!(!crypto
+            .mldsa_verify(&pk, b"a different message", &signature)
+            .expect("verification should succeed"));
+
+        for byte in [0usize, PQ_SIGNATURE_LENGTH / 2, PQ_SIGNATURE_LENGTH - 1] {
+            let mut tampered = signature;
+            tampered[byte] ^= 0x01;
+            assert!(!crypto
+                .mldsa_verify(&pk, PQ_SIG_MESSAGE, &tampered)
+                .expect("verification should succeed"));
+        }
+
+        assert!(!crypto
+            .mldsa_verify(&pk, PQ_SIG_MESSAGE, &[0u8; PQ_SIGNATURE_LENGTH])
+            .expect("verification should succeed"));
     }
 }

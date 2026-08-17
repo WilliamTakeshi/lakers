@@ -6,7 +6,9 @@ use lakers_shared::{
 };
 #[cfg(feature = "pq")]
 use lakers_shared::{
-    BytesKemCiphertext, BytesKemDecapsKey, BytesKemEncapsKey, BytesKemSharedSecret,
+    BytesKemCiphertext, BytesKemDecapsKey, BytesKemEncapsKey, BytesKemSharedSecret, BytesPqSignKey,
+    BytesPqSignature, BytesPqVerifyKey, ML_DSA_SIGN_KEY_LEN, ML_DSA_VERIFY_KEY_LEN,
+    PQ_SIGNATURE_LENGTH,
 };
 use lakers_shared::{BytesSignature, CcmTagLen};
 
@@ -287,7 +289,75 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
             &ciphertext,
         ))
     }
+
+    #[cfg(feature = "pq")]
+    fn mldsa_generate_key_pair(
+        &mut self,
+    ) -> Result<(BytesPqSignKey, BytesPqVerifyKey), EDHOCError> {
+        let mut seed = [0u8; libcrux_ml_dsa::KEY_GENERATION_RANDOMNESS_SIZE];
+        self.rng.fill_bytes(&mut seed);
+
+        let key_pair = libcrux_ml_dsa::ml_dsa_44::portable::generate_key_pair(seed);
+
+        Ok((
+            *key_pair.signing_key.as_ref(),
+            *key_pair.verification_key.as_ref(),
+        ))
+    }
+
+    #[cfg(feature = "pq")]
+    fn mldsa_sign(
+        &mut self,
+        signing_key: &BytesPqSignKey,
+        message: &[u8],
+    ) -> Result<BytesPqSignature, EDHOCError> {
+        let mut randomness = [0u8; libcrux_ml_dsa::SIGNING_RANDOMNESS_SIZE];
+        self.rng.fill_bytes(&mut randomness);
+
+        let signing_key = libcrux_ml_dsa::ml_dsa_44::MLDSA44SigningKey::new(*signing_key);
+
+        // Empty context: EDHOC does its own domain separation through the COSE Sig_structure.
+        libcrux_ml_dsa::ml_dsa_44::portable::sign(&signing_key, message, &[], randomness)
+            .map(|signature| *signature.as_ref())
+            .map_err(|_| EDHOCError::UnsupportedCipherSuite)
+    }
+
+    #[cfg(feature = "pq")]
+    fn mldsa_verify(
+        &mut self,
+        verify_key: &BytesPqVerifyKey,
+        message: &[u8],
+        signature: &BytesPqSignature,
+    ) -> Result<bool, EDHOCError> {
+        let verify_key = libcrux_ml_dsa::ml_dsa_44::MLDSA44VerificationKey::new(*verify_key);
+        let signature = libcrux_ml_dsa::ml_dsa_44::MLDSA44Signature::new(*signature);
+
+        Ok(
+            libcrux_ml_dsa::ml_dsa_44::portable::verify(&verify_key, message, &[], &signature)
+                .is_ok(),
+        )
+    }
 }
+
+/// The sizes in lakers-shared are written out as literals, because they come from the cipher
+/// suite rather than from whichever backend happens to be compiled in. Check them against the
+/// implementation so the two cannot drift apart silently.
+#[cfg(feature = "pq")]
+const _: () = {
+    use lakers_shared::{
+        ML_KEM_CIPHERTEXT_LEN, ML_KEM_DECAPS_KEY_LEN, ML_KEM_ENCAPS_KEY_LEN,
+        ML_KEM_SHARED_SECRET_LEN,
+    };
+
+    assert!(ML_KEM_SHARED_SECRET_LEN == libcrux_ml_kem::SHARED_SECRET_SIZE);
+    assert!(ML_KEM_ENCAPS_KEY_LEN == libcrux_ml_kem::mlkem512::MlKem512PublicKey::len());
+    assert!(ML_KEM_DECAPS_KEY_LEN == libcrux_ml_kem::mlkem512::MlKem512PrivateKey::len());
+    assert!(ML_KEM_CIPHERTEXT_LEN == libcrux_ml_kem::mlkem512::MlKem512Ciphertext::len());
+
+    assert!(ML_DSA_SIGN_KEY_LEN == libcrux_ml_dsa::ml_dsa_44::MLDSA44SigningKey::len());
+    assert!(ML_DSA_VERIFY_KEY_LEN == libcrux_ml_dsa::ml_dsa_44::MLDSA44VerificationKey::len());
+    assert!(PQ_SIGNATURE_LENGTH == libcrux_ml_dsa::ml_dsa_44::MLDSA44Signature::len());
+};
 
 #[cfg(test)]
 mod tests {
@@ -307,6 +377,19 @@ mod tests {
         let mut crypto = Crypto::new(rand_core::OsRng);
         test_mlkem_roundtrip::<Crypto<rand_core::OsRng>>(&mut crypto);
         test_mlkem_implicit_rejection::<Crypto<rand_core::OsRng>>(&mut crypto);
+    }
+
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_rustcrypto_mldsa() {
+        use lakers_shared::test_helper::{
+            test_mldsa_is_randomised, test_mldsa_rejects_bad_signature, test_mldsa_roundtrip,
+        };
+
+        let mut crypto = Crypto::new(rand_core::OsRng);
+        test_mldsa_roundtrip::<Crypto<rand_core::OsRng>>(&mut crypto);
+        test_mldsa_is_randomised::<Crypto<rand_core::OsRng>>(&mut crypto);
+        test_mldsa_rejects_bad_signature::<Crypto<rand_core::OsRng>>(&mut crypto);
     }
 
     #[test]

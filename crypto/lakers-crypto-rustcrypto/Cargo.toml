@@ -24,6 +24,7 @@ rand_core = { version = "0.6.4", default-features = false }
 # `default-features = false` keeps out `std`, `alloc` and the mlkem768/1024
 # parameter sets we do not use.
 libcrux-ml-kem = { version = "=0.0.10", default-features = false, features = [ "mlkem512" ], optional = true }
+libcrux-ml-dsa = { version = "=0.0.10", default-features = false, features = [ "mldsa44" ], optional = true }
 
 [features]
 default = [ ]
@@ -32,4 +33,4 @@ default = [ ]
 ##
 ## This is the only backend that implements them; PSA and CryptoCell310 have no
 ## underlying support, and take the trait's default `Err` bodies instead.
-pq = [ "lakers-shared/pq", "dep:libcrux-ml-kem" ]
+pq = [ "lakers-shared/pq", "dep:libcrux-ml-kem", "dep:libcrux-ml-dsa" ]

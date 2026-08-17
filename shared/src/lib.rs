@@ -87,6 +87,20 @@ pub const ML_KEM_SHARED_SECRET_LEN: usize = 32;
 
 #[cfg(feature = "pq")]
 const _: () = assert!(ML_KEM_SHARED_SECRET_LEN == P256_ELEM_LEN);
+
+/// ML-DSA-44 sizes, per FIPS 204. Same rationale as the ML-KEM constants above.
+#[cfg(feature = "pq")]
+pub const ML_DSA_VERIFY_KEY_LEN: usize = 1312;
+#[cfg(feature = "pq")]
+pub const ML_DSA_SIGN_KEY_LEN: usize = 2560;
+/// An ML-DSA-44 signature, 2420 bytes against ES256's 64.
+///
+/// This is deliberately a *second* constant rather than a redefinition of
+/// [`SIGNATURE_LENGTH`]: the classical methods keep their 64-byte signatures, and the
+/// plaintext encoders and decoders are already generic over the width, so the two coexist
+/// without touching any backend's ECDSA code.
+#[cfg(feature = "pq")]
+pub const PQ_SIGNATURE_LENGTH: usize = 2420;
 pub const MAX_EAD_ITEMS: usize = 4;
 
 // maximum supported length of connection identifier for R
@@ -241,6 +255,12 @@ pub type BytesKemDecapsKey = [u8; ML_KEM_DECAPS_KEY_LEN];
 pub type BytesKemCiphertext = [u8; ML_KEM_CIPHERTEXT_LEN];
 #[cfg(feature = "pq")]
 pub type BytesKemSharedSecret = [u8; ML_KEM_SHARED_SECRET_LEN];
+#[cfg(feature = "pq")]
+pub type BytesPqVerifyKey = [u8; ML_DSA_VERIFY_KEY_LEN];
+#[cfg(feature = "pq")]
+pub type BytesPqSignKey = [u8; ML_DSA_SIGN_KEY_LEN];
+#[cfg(feature = "pq")]
+pub type BytesPqSignature = [u8; PQ_SIGNATURE_LENGTH];
 pub type BytesElemLenPSK = [u8; ELEM_LEN_PSK];
 pub type BufferMessage2 = EdhocMessageBuffer;
 /// Generic buffer type (soft-deprecated).
@@ -1240,6 +1260,17 @@ mod edhoc_parser {
         decode_plaintext_2_sized::<SIGNATURE_LENGTH>(plaintext_2)
     }
 
+    /// Same decoder as [`decode_plaintext_2_sig`], instantiated at the ML-DSA-44 width.
+    ///
+    /// The width was already a const parameter, so post-quantum signatures need no new
+    /// decoding path -- only a second instantiation.
+    #[cfg(feature = "pq")]
+    pub fn decode_plaintext_2_pqsig(
+        plaintext_2: &BufferCiphertext2,
+    ) -> Result<(ConnId, IdCred, BytesPqSignature, EadItems), EDHOCError> {
+        decode_plaintext_2_sized::<PQ_SIGNATURE_LENGTH>(plaintext_2)
+    }
+
     // TODO: rename to decode_plaintext_3_stat
     pub fn decode_plaintext_2(
         plaintext_2: &BufferCiphertext2,
@@ -1304,6 +1335,14 @@ mod edhoc_parser {
         plaintext_3: &BufferPlaintext3,
     ) -> Result<(IdCred, BytesSignature, EadItems), EDHOCError> {
         decode_plaintext_3_sized::<SIGNATURE_LENGTH>(plaintext_3)
+    }
+
+    /// Same decoder as [`decode_plaintext_3_sig`], instantiated at the ML-DSA-44 width.
+    #[cfg(feature = "pq")]
+    pub fn decode_plaintext_3_pqsig(
+        plaintext_3: &BufferPlaintext3,
+    ) -> Result<(IdCred, BytesPqSignature, EadItems), EDHOCError> {
+        decode_plaintext_3_sized::<PQ_SIGNATURE_LENGTH>(plaintext_3)
     }
 
     // TODO: rename to decode_plaintext_3_stat
