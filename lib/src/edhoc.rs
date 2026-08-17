@@ -1892,11 +1892,11 @@ mod tests {
     #[test]
     fn test_decrypt_message_3_malformed_header_returns_error() {
         let cases: [&[u8]; 5] = [
-            &[],                        // empty
-            &[0x58],                    // one-byte length header, length missing
-            &[0x59, 0x01],              // two-byte length header, second length byte missing
-            &[0x58, 0xff, 0xaa, 0xbb],  // length runs past the end of the buffer
-            &[0x43, 0xaa, 0xbb, 0xcc],  // valid bstr, but shorter than the AEAD tag
+            &[],                       // empty
+            &[0x58],                   // one-byte length header, length missing
+            &[0x59, 0x01],             // two-byte length header, second length byte missing
+            &[0x58, 0xff, 0xaa, 0xbb], // length runs past the end of the buffer
+            &[0x43, 0xaa, 0xbb, 0xcc], // valid bstr, but shorter than the AEAD tag
         ];
 
         for case in cases {
