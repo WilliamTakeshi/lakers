@@ -448,6 +448,42 @@ specify which EDHOC error message is sent when the resulting MAC/AEAD check fail
 and the document does not discuss a `SUITES_I` containing both classical and PQ suites — which
 is the deployment case that matters during transition.
 
+### D14 — undefined `kemp.` prefix used for `kem.` in nine places · **E**
+
+§1.2.1 defines exactly one KEM namespace: `KEM.KeyGen` yields `(kem.sk, kem.pk)`,
+`KEM.Encapsulation` yields `(ss, kem.ct)`. The prefix `kemp.` is never defined anywhere in the
+document, but appears nine times, always naming an object that the `kem.` prefix names
+elsewhere:
+
+| Spelling       | Occurrences | `kem.` twin      | Occurrences |
+| -------------- | ----------- | ---------------- | ----------- |
+| `kemp.ct_eph`  | 5           | `kem.ct_eph`     | 27          |
+| `kemp.pk_R`    | 3           | `kem.pk_R`       | 10          |
+| `kemp.pk_eph`  | 1           | `kem.pk_eph`     | 20          |
+
+Locations, by section: §2.2.1.3 (`kemp.ct_eph`, `kemp.pk_R`), §2.2.3.1 (`kemp.pk_eph`),
+§3.2.2.3 (`kemp.ct_eph`, `kemp.pk_R`), §3.3.2.3, §3.4.2.3, §3.5.2.3 (`kemp.ct_eph` in each,
+plus `kemp.pk_R` in §3.5.2.3).
+
+That these are typographical rather than a second namespace is settled by §2.2.3.1, where both
+spellings denote the same value inside one sentence:
+
+> On reception of the ephemeral KEM public key **kemp.pk_eph**, the Responder generates a pair
+> (ss_eph, kem.ct_eph) with the KEM.Encapsulation algorithm (with input **kem.pk_eph**).
+
+The five `kemp.ct_eph` hits are one paragraph — "On reception of the second message, the
+Initiator, using kemp.ct_eph, can compute the ephemeral shared-secret ss_eph…" — reproduced
+verbatim in §2.2.1.3 and once per §3 variant, so a single original typo propagated with the
+boilerplate.
+
+The signature namespace has no equivalent problem: `sign.{sk,pk}_{I,R}` and `DS.{KeyGen,Sign,Verify}`
+are used consistently throughout.
+
+**Proposed:** global replace `kemp.` → `kem.`. Worth fixing despite being cosmetic — a reader
+implementing from the text has no way to know whether `kemp.pk_R` is the same key as `kem.pk_R`
+or a distinct one belonging to some unstated second parameter set, and §3's variants do give
+each role two long-term keys (see D8), which makes the ambiguity a plausible one to fall into.
+
 ---
 
 ## 6. What the lakers prototype implements
