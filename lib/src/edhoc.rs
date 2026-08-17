@@ -35,6 +35,11 @@ struct ParsedMessage3 {
     plaintext_3: BufferPlaintext3,
     id_cred: IdCred,
     ead_3: EadItems,
+    /// A `PRK_3e2m` that only became derivable while parsing message_3, overriding the one
+    /// `WaitM3` carried. That happens exactly when the Responder authenticates by KEM: `ss_R`
+    /// arrives in this very message, so `WaitM3` holds `PRK_2e` in its place.
+    #[cfg(feature = "pq")]
+    prk_3e2m: Option<BytesHashLen>,
 }
 #[derive(Debug)]
 struct DecodedMessage2 {
@@ -368,17 +373,20 @@ pub fn r_parse_message_3(
         WaitM3MethodSpecifics::Psk { cred_r } => {
             r_parse_message_3_psk(state, crypto, message_3, cred_r)?
         }
-        // message_3 carries kem.ct_R, from which PRK_3e2m has to be derived before the
-        // ciphertext can be decrypted at all. Wired up next.
         #[cfg(feature = "pq")]
-        WaitM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
+        WaitM3MethodSpecifics::Pq { .. } => pq::r_parse_message_3_pq(state, crypto, message_3)?,
     };
+
+    #[cfg(feature = "pq")]
+    let prk_3e2m = parsed.prk_3e2m.unwrap_or(state.prk_3e2m);
+    #[cfg(not(feature = "pq"))]
+    let prk_3e2m = state.prk_3e2m;
 
     Ok((
         ProcessingM3 {
             method_specifics: parsed.method_specifics,
             y: state.y,
-            prk_3e2m: state.prk_3e2m,
+            prk_3e2m,
             th_3: state.th_3,
             plaintext_3: parsed.plaintext_3,
             ead_3: parsed.ead_3.clone(),
@@ -407,15 +415,22 @@ where
             cred_r,
             resolve_cred_i,
         )?,
+        // The credential resolver exists so PSK can look CRED_R up mid-parse; the post-quantum
+        // methods need nothing of the sort, so both entry points take the same path.
         #[cfg(feature = "pq")]
-        WaitM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
+        WaitM3MethodSpecifics::Pq { .. } => pq::r_parse_message_3_pq(state, crypto, message_3)?,
     };
+
+    #[cfg(feature = "pq")]
+    let prk_3e2m = parsed.prk_3e2m.unwrap_or(state.prk_3e2m);
+    #[cfg(not(feature = "pq"))]
+    let prk_3e2m = state.prk_3e2m;
 
     Ok((
         ProcessingM3 {
             method_specifics: parsed.method_specifics,
             y: state.y,
-            prk_3e2m: state.prk_3e2m,
+            prk_3e2m,
             th_3: state.th_3,
             plaintext_3: parsed.plaintext_3,
             ead_3: parsed.ead_3.clone(),
@@ -446,6 +461,10 @@ pub fn r_verify_message_3(
             let salt_4e3m = compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3);
             r_verify_message_3_psk(state, crypto, valid_cred_i, id_cred_psk, cred_r, &salt_4e3m)
         }?,
+        // Verifying SIGNATURE_3 and computing TH_4 is the initiator-authentication half of
+        // §3.2; wired up next.
+        #[cfg(feature = "pq")]
+        ProcessingM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
     };
 
     let mut prk_out: BytesHashLen = Default::default();
@@ -1209,6 +1228,82 @@ fn encrypt_message_3<TagLen: CcmTagLen>(
         .map_err(|_| EDHOCError::EncodingError)?;
 
     Ok(output)
+}
+
+/// message_3 for a post-quantum method, optionally prefixed with `kem.ct_R`.
+///
+/// The wire shape is the two-element CBOR sequence `bstr(kem.ct_R), bstr(CIPHERTEXT_3)`,
+/// matching the comma in the draft's figures; a Responder that does not authenticate by KEM
+/// (§3.3) sends no prefix and the message is RFC 9528's single `bstr`.
+///
+/// `draft-spm-lake-pqsuites` mandates AES-CCM-16-128-128, so this is also where the 16-byte
+/// tag is bound to the post-quantum suite.
+// The Initiator does not reach this yet: `i_prepare_message_3_pq` needs SIGNATURE_3, which is
+// the next commit. Exercised meanwhile by the message_3 tests.
+#[cfg(feature = "pq")]
+#[allow(dead_code)]
+pub(crate) fn encrypt_message_3_pq(
+    crypto: &mut impl CryptoTrait,
+    prk_3e2m: &BytesHashLen,
+    th_3: &BytesHashLen,
+    plaintext_3: &BufferPlaintext3,
+    kem_ct_r: Option<&BytesKemCiphertext>,
+) -> Result<BufferMessage3, EDHOCError> {
+    let ciphertext_part =
+        encrypt_message_3::<CcmTagLen16>(crypto, prk_3e2m, th_3, plaintext_3, None)?;
+
+    let Some(kem_ct_r) = kem_ct_r else {
+        return Ok(ciphertext_part);
+    };
+
+    let mut output = BufferMessage3::new();
+    encode_bstr_header(&mut output, kem_ct_r.len())?;
+    output
+        .extend_from_slice(kem_ct_r)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(ciphertext_part.as_slice())
+        .map_err(|_| EDHOCError::EncodingError)?;
+
+    Ok(output)
+}
+
+/// Split `kem.ct_R` off the front of message_3, returning it and the remaining
+/// `bstr(CIPHERTEXT_3)`.
+///
+/// This is a separate step rather than part of [`decrypt_message_3_pq`] because of the
+/// ordering the KEM forces: `PRK_3e2m` is derived *from* this ciphertext, so it cannot be an
+/// argument to the function that reads it.
+#[cfg(feature = "pq")]
+fn strip_kem_ct_r(
+    message_3: &BufferMessage3,
+) -> Result<(BytesKemCiphertext, BufferMessage3), EDHOCError> {
+    let (bytestring_length, prefix_length) = decode_bstr_header(message_3.as_slice())?;
+
+    if bytestring_length != ML_KEM_CIPHERTEXT_LEN {
+        return Err(EDHOCError::ParsingError);
+    }
+
+    let mut kem_ct_r: BytesKemCiphertext = [0; ML_KEM_CIPHERTEXT_LEN];
+    kem_ct_r
+        .copy_from_slice(&message_3.as_slice()[prefix_length..prefix_length + bytestring_length]);
+
+    let rest =
+        BufferMessage3::new_from_slice(&message_3.as_slice()[prefix_length + bytestring_length..])
+            .map_err(|_| EDHOCError::ParsingError)?;
+
+    Ok((kem_ct_r, rest))
+}
+
+/// The counterpart to [`encrypt_message_3_pq`], taking what [`strip_kem_ct_r`] left.
+#[cfg(feature = "pq")]
+fn decrypt_message_3_pq(
+    crypto: &mut impl CryptoTrait,
+    prk_3e2m: &BytesHashLen,
+    th_3: &BytesHashLen,
+    ciphertext_part: &BufferMessage3,
+) -> Result<BufferPlaintext3, EDHOCError> {
+    decrypt_message_3::<CcmTagLen16>(crypto, prk_3e2m, th_3, ciphertext_part, None)
 }
 
 fn decrypt_message_3<TagLen: CcmTagLen>(

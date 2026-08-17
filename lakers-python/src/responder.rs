@@ -190,6 +190,12 @@ impl PyEdhocResponder {
             ProcessingM3MethodSpecifics::Psk { .. } => EDHOCMethod::PSK,
             // TODO: SigSig support for the Python bindings
             ProcessingM3MethodSpecifics::Signature { .. } => EDHOCMethod::SigSig,
+            // The post-quantum variants are not exposed here. This has to be a catch-all
+            // rather than a cfg: `#[cfg(feature = "pq")]` in this crate tests *its* features,
+            // and `--features lakers/pq` leaves it off while feature unification still
+            // supplies the variant.
+            #[allow(unreachable_patterns)]
+            _ => return Err(EDHOCError::UnsupportedMethod.into()),
         };
         let valid_cred_i = super::parse_credential(method, valid_cred_i)
             .with_cause(py, "Failed to ingest CRED_I")?;

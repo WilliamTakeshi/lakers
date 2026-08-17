@@ -1676,6 +1676,184 @@ mod test {
         );
     }
 
+    /// Drive §3.2 through message_2 and hand back everything message_3 needs: the Initiator's
+    /// `PRK_3e2m`, `TH_3` and `kem.ct_R`, and the Responder still in `WaitM3`.
+    ///
+    /// The Initiator cannot build message_3 itself yet -- SIGNATURE_3 is the next commit -- so
+    /// the tests below assemble it from these pieces.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    fn pq_up_to_message_3() -> (
+        BytesHashLen,
+        BytesHashLen,
+        BytesKemCiphertext,
+        Credential,
+        EdhocResponderWaitM3<lakers_crypto::Crypto>,
+    ) {
+        let mut crypto = default_crypto();
+        let (cred_r, r_identity) = pq_responder_material(&mut crypto);
+        let (dsa_sk_i, _) = crypto.mldsa_generate_key_pair().unwrap();
+        let cred_i = Credential::parse_ccs(CRED_I.try_into().unwrap()).unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let responder = EdhocResponder::new(default_crypto(), r_identity, cred_r.clone());
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        initiator
+            .set_identity(
+                InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk: dsa_sk_i }),
+                cred_i.clone(),
+            )
+            .unwrap();
+        let initiator = initiator.verify_message_2(Some(cred_r)).unwrap();
+
+        let ProcessedM2MethodSpecifics::Pq { kem_ct_r, .. } = &initiator.state.method_specifics
+        else {
+            panic!("method 40 is a post-quantum method");
+        };
+        let kem_ct_r = kem_ct_r.expect("the responder of method 40 authenticates by KEM");
+
+        (
+            initiator.state.prk_3e2m,
+            initiator.state.th_3,
+            kem_ct_r,
+            cred_i,
+            responder,
+        )
+    }
+
+    /// A stand-in PLAINTEXT_3: `ID_CRED_I` by reference followed by an ML-DSA-44-width
+    /// authenticator. Built by hand rather than through `encode_plaintext_3` so that the test
+    /// pins the bytes the decoder is expected to accept.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    fn pq_dummy_plaintext_3(cred_i: &Credential) -> BufferPlaintext3 {
+        let mut plaintext_3 = BufferPlaintext3::new();
+        plaintext_3
+            .extend_from_slice(cred_i.by_kid().unwrap().as_encoded_value())
+            .unwrap();
+        // bstr header for 2420 bytes, then the signature itself.
+        plaintext_3
+            .extend_from_slice(&[
+                0x59,
+                (PQ_SIGNATURE_LENGTH >> 8) as u8,
+                (PQ_SIGNATURE_LENGTH & 0xff) as u8,
+            ])
+            .unwrap();
+        plaintext_3
+            .extend_from_slice(&[0xa5u8; PQ_SIGNATURE_LENGTH])
+            .unwrap();
+        plaintext_3
+    }
+
+    /// The Responder's `PRK_3e2m` only exists once it has decapsulated the `kem.ct_R` that
+    /// rides on message_3 -- a message later than RFC 9528 derives it. This is the test that
+    /// the two roles land on the same key across that gap.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_message_3_carries_kem_ct_r() {
+        let (i_prk_3e2m, i_th_3, kem_ct_r, cred_i, responder) = pq_up_to_message_3();
+        let plaintext_3 = pq_dummy_plaintext_3(&cred_i);
+
+        let message_3 = crate::edhoc::encrypt_message_3_pq(
+            &mut default_crypto(),
+            &i_prk_3e2m,
+            &i_th_3,
+            &plaintext_3,
+            Some(&kem_ct_r),
+        )
+        .unwrap();
+
+        // bstr(kem.ct_R) with the two-byte length header, then bstr(CIPHERTEXT_3).
+        assert_eq!(&message_3.as_slice()[..3], &[0x59, 0x03, 0x00]);
+        assert_eq!(
+            &message_3.as_slice()[3..3 + ML_KEM_CIPHERTEXT_LEN],
+            &kem_ct_r[..]
+        );
+
+        let (responder, id_cred_i, _ead_3) = responder
+            .parse_message_3(&message_3)
+            .expect("the responder decapsulates kem.ct_R and only then decrypts CIPHERTEXT_3");
+
+        assert_eq!(
+            responder.state.prk_3e2m, i_prk_3e2m,
+            "PRK_3e2m must agree even though the two roles derive it one message apart"
+        );
+        assert_eq!(
+            id_cred_i.as_encoded_value(),
+            cred_i.by_kid().unwrap().as_encoded_value()
+        );
+        assert_eq!(responder.state.plaintext_3, plaintext_3);
+    }
+
+    /// ML-KEM decapsulation never reports failure -- implicit rejection returns an
+    /// unpredictable shared secret instead. So a tampered `kem.ct_R` cannot be caught where it
+    /// is read; it surfaces one step later, as an AEAD tag failure on CIPHERTEXT_3.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_message_3_tampered_kem_ct_r_fails_at_the_aead() {
+        let (i_prk_3e2m, i_th_3, kem_ct_r, cred_i, responder) = pq_up_to_message_3();
+        let plaintext_3 = pq_dummy_plaintext_3(&cred_i);
+
+        let mut message_3 = crate::edhoc::encrypt_message_3_pq(
+            &mut default_crypto(),
+            &i_prk_3e2m,
+            &i_th_3,
+            &plaintext_3,
+            Some(&kem_ct_r),
+        )
+        .unwrap();
+
+        #[allow(deprecated)]
+        {
+            message_3.content[3] ^= 0x01;
+        }
+
+        assert_eq!(
+            responder
+                .parse_message_3(&message_3)
+                .map(|_| ())
+                .unwrap_err(),
+            EDHOCError::MacVerificationFailed
+        );
+    }
+
+    /// The prefix is length-checked before it is used as a ciphertext: a message_3 whose first
+    /// byte string is not an ML-KEM ciphertext is a parsing error, not a decapsulation of
+    /// whatever happened to be there.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_message_3_rejects_a_wrong_sized_prefix() {
+        let (.., responder) = pq_up_to_message_3();
+
+        let mut message_3 = BufferMessage3::new();
+        message_3.extend_from_slice(&[0x58, 0x20]).unwrap();
+        message_3.extend_from_slice(&[0u8; 32]).unwrap();
+        message_3.extend_from_slice(&[0x48]).unwrap();
+        message_3.extend_from_slice(&[0u8; 8]).unwrap();
+
+        assert_eq!(
+            responder
+                .parse_message_3(&message_3)
+                .map(|_| ())
+                .unwrap_err(),
+            EDHOCError::ParsingError
+        );
+    }
+
     /// The public API up to the point the ephemeral KEM reaches: the Initiator generates an
     /// ML-KEM ephemeral pair instead of a DH one and sends `kem.pk_eph`, and the Responder
     /// encapsulates to it while processing message_1.

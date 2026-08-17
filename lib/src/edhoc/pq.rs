@@ -21,15 +21,16 @@
 //! and `PRK_3e2m` otherwise. See `pq_edhoc_section3.md` §4.
 
 use super::{
-    compute_mac_2, compute_salt_3e2m, compute_th_3, encode_plaintext_2, encode_sig_structure,
-    BytesHashLen, BytesMacSig, ConnId, Credential, CredentialKey, CredentialTransfer,
-    Crypto as CryptoTrait, DecodedMessage2, EDHOCError, EadItems, ParsedMessage2Details,
-    PreparedMessage2, ProcessingM2, ProcessingM2MethodSpecifics, VerifiedPeerMessage2,
+    compute_mac_2, compute_salt_3e2m, compute_th_3, decrypt_message_3_pq, encode_plaintext_2,
+    encode_sig_structure, strip_kem_ct_r, BufferMessage3, BytesHashLen, BytesMacSig, ConnId,
+    Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
+    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PreparedMessage2, ProcessingM2,
+    ProcessingM2MethodSpecifics, ProcessingM3MethodSpecifics, VerifiedPeerMessage2, WaitM3,
     WaitM3MethodSpecifics,
 };
 use lakers_shared::{
-    decode_plaintext_2_pqsig, BytesKemDecapsKey, BytesKemEncapsKey, BytesPqSignKey,
-    BytesPqVerifyKey, PqAuthMode,
+    decode_plaintext_2_pqsig, decode_plaintext_3_pqsig, BytesKemDecapsKey, BytesKemEncapsKey,
+    BytesPqSignKey, BytesPqVerifyKey, PqAuthMode,
 };
 
 /// The Responder's public key material, split out of a credential according to its mode.
@@ -129,8 +130,66 @@ pub(crate) fn r_prepare_message_2_pq(
             i_mode,
             r_mode,
             prk_2e: *prk_2e,
+            th_2: *th_2,
             kem_dk: kem_dk.copied(),
         },
+    })
+}
+
+/// Decrypt and decode message_3, deriving `PRK_3e2m` from its `kem.ct_R` prefix first.
+///
+/// This is the Responder's half of the step the Initiator took in
+/// [`i_verify_message_2_pq`]: it is only now, one message later, that `ss_R` reaches the role
+/// whose static key defines it.
+///
+/// Note what ML-KEM's implicit rejection means here: `kem_decapsulate` never reports failure,
+/// it returns an unpredictable shared secret for a bad ciphertext. A tampered `kem.ct_R` is
+/// therefore caught by the AEAD tag on CIPHERTEXT_3, not by decapsulation, and surfaces as
+/// [`EDHOCError::MacVerificationFailed`].
+pub(crate) fn r_parse_message_3_pq(
+    state: &WaitM3,
+    crypto: &mut impl CryptoTrait,
+    message_3: &BufferMessage3,
+) -> Result<ParsedMessage3, EDHOCError> {
+    let WaitM3MethodSpecifics::Pq {
+        i_mode,
+        r_mode,
+        prk_2e,
+        th_2,
+        kem_dk,
+    } = &state.method_specifics
+    else {
+        // FIXME: not an error so much as a lack of agreement between peers.
+        return Err(EDHOCError::UnsupportedMethod);
+    };
+
+    let (prk_3e2m, ciphertext_part) = if r_mode.uses_kem() {
+        let kem_dk = kem_dk.as_ref().ok_or(EDHOCError::MissingIdentity)?;
+        let (kem_ct_r, rest) = strip_kem_ct_r(message_3)?;
+        let ss_r = crypto.kem_decapsulate(kem_dk, &kem_ct_r)?;
+        let salt_3e2m = compute_salt_3e2m(crypto, prk_2e, th_2);
+        (crypto.hkdf_extract(&salt_3e2m, &ss_r), rest)
+    } else {
+        // §3.3: the Responder only signs, so the ladder passed through at message_2 and
+        // message_3 has RFC 9528's shape.
+        (*prk_2e, message_3.clone())
+    };
+
+    let plaintext_3 = decrypt_message_3_pq(crypto, &prk_3e2m, &state.th_3, &ciphertext_part)?;
+
+    // Every §3 variant has the Initiator sign message_3, whether or not it also uses a KEM.
+    let (id_cred_i, signature_3, ead_3) = decode_plaintext_3_pqsig(&plaintext_3)?;
+
+    Ok(ParsedMessage3 {
+        method_specifics: ProcessingM3MethodSpecifics::Pq {
+            i_mode: *i_mode,
+            signature_3,
+            id_cred_i: id_cred_i.clone(),
+        },
+        id_cred: id_cred_i,
+        plaintext_3,
+        ead_3,
+        prk_3e2m: Some(prk_3e2m),
     })
 }
 

@@ -111,6 +111,8 @@ where
             id_cred: id_cred_psk,
             plaintext_3: plaintext_3b, // NOTE: this is needed for th_4, which needs valid_cred_i, which is only available at the 'verify' step
             ead_3: ead_3.clone(), // NOTE: this clone could be avoided by using a reference or an index to the ead_3 item in plaintext_3
+            #[cfg(feature = "pq")]
+            prk_3e2m: None,
         })
     } else {
         Err(decoded_p3_res.unwrap_err())

@@ -97,6 +97,8 @@ pub(crate) fn r_parse_message_3_sig(
         id_cred: id_cred_i,
         plaintext_3,
         ead_3,
+        #[cfg(feature = "pq")]
+        prk_3e2m: None,
     })
 }
 

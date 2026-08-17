@@ -792,11 +792,15 @@ pub enum WaitM3MethodSpecifics {
     /// Initiator encapsulates and sends `kem.ct_R` in message_3 -- so it carries `PRK_2e` and
     /// its own decapsulation key forward instead, and derives `PRK_3e2m` on receiving
     /// message_3.
+    ///
+    /// `th_2` rides along because `SALT_3e2m = EDHOC-KDF(PRK_2e, 1, TH_2)` is over TH_2, not
+    /// TH_3, and TH_2 is otherwise dropped once `WaitM3` is built.
     #[cfg(feature = "pq")]
     Pq {
         i_mode: PqAuthMode,
         r_mode: PqAuthMode,
         prk_2e: BytesHashLen,
+        th_2: BytesHashLen,
         kem_dk: Option<BytesKemDecapsKey>,
     },
 }
@@ -924,6 +928,18 @@ pub enum ProcessingM3MethodSpecifics {
     Psk {
         id_cred_psk: IdCred,
         cred_r: Credential,
+    },
+    /// All four of the draft's §3 variants have the Initiator sign message_3, so `signature_3`
+    /// is not optional here the way `signature_2` is on the Responder side.
+    ///
+    /// `i_mode` says whether the Initiator *also* authenticates by KEM, which decides where
+    /// `PRK_4e3m` comes from: `PRK_3e2m` when it only signs, and `ss_I` from message_4's
+    /// `kem.ct_I` when it does not.
+    #[cfg(feature = "pq")]
+    Pq {
+        i_mode: PqAuthMode,
+        signature_3: BytesPqSignature,
+        id_cred_i: IdCred,
     },
 }
 #[derive(Debug)]
