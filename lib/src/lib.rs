@@ -380,10 +380,18 @@ impl<'a, Crypto: CryptoTrait> EdhocResponderWaitM3<Crypto> {
 }
 
 impl<'a, Crypto: CryptoTrait> EdhocResponderProcessingM3<Crypto> {
+    /// `PRK_out` is `None` for a method that only derives it at message_4 -- see
+    /// [`PrkOutTiming`].
     pub fn verify_message_3(
         mut self,
         cred_i: Credential,
-    ) -> Result<(EdhocResponderProcessedM3<Crypto>, [u8; SHA256_DIGEST_LEN]), EDHOCError> {
+    ) -> Result<
+        (
+            EdhocResponderProcessedM3<Crypto>,
+            Option<[u8; SHA256_DIGEST_LEN]>,
+        ),
+        EDHOCError,
+    > {
         trace!("Enter verify_message_3");
         match r_verify_message_3(&mut self.state, &mut self.crypto, cred_i) {
             Ok((state, prk_out)) => Ok((
@@ -597,7 +605,7 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiatorProcessedM2<Crypto> {
         (
             EdhocInitiatorWaitM4<Crypto>,
             BufferMessage3,
-            [u8; SHA256_DIGEST_LEN],
+            Option<[u8; SHA256_DIGEST_LEN]>,
         ),
         EDHOCError,
     > {
@@ -643,10 +651,14 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiatorWaitM4<Crypto> {
         }
     }
 
-    pub fn completed_without_message_4(self) -> Result<EdhocResponderDone<Crypto>, EDHOCError> {
+    /// Finish without message_4.
+    ///
+    /// Refused by a method that only derives `PRK_out` at message_4; there, message_4 is
+    /// mandatory rather than optional.
+    pub fn completed_without_message_4(self) -> Result<EdhocInitiatorDone<Crypto>, EDHOCError> {
         trace!("Enter completed");
         match i_complete_without_message_4(&self.state) {
-            Ok(state) => Ok(EdhocResponderDone {
+            Ok(state) => Ok(EdhocInitiatorDone {
                 state,
                 crypto: self.crypto,
             }),
@@ -1017,6 +1029,60 @@ mod test {
 
         assert_eq!(i_oscore_secret, r_oscore_secret);
         assert_eq!(i_oscore_salt, r_oscore_salt);
+    }
+
+    /// `completed_without_message_4` hands each role its own `Done` type. The Initiator's used
+    /// to return `EdhocResponderDone` -- both wrap `Completed`, so it compiled, and only an
+    /// explicit annotation like the one here catches it.
+    ///
+    /// It also has to keep working for the methods that derive `PRK_out` at message_3, which
+    /// is every classical one and §3.2; only the deferred ones may refuse.
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_completed_without_message_4_is_per_role() {
+        let cred_i = Credential::parse_ccs(CRED_I.try_into().unwrap()).unwrap();
+        let cred_r = Credential::parse_ccs(CRED_R.try_into().unwrap()).unwrap();
+        let i: BytesP256ElemLen = I.try_into().unwrap();
+        let r: BytesP256ElemLen = R.try_into().unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::StatStat,
+            EDHOCSuite::CipherSuite2,
+        );
+        let responder = EdhocResponder::new(
+            default_crypto(),
+            ResponderIdentity::StaticDh { r },
+            cred_r.clone(),
+        );
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        initiator
+            .set_identity(InitiatorIdentity::StaticDh { i }, cred_i.clone())
+            .unwrap();
+        let initiator = initiator.verify_message_2(Some(cred_r)).unwrap();
+        let (initiator, message_3, i_prk_out) = initiator
+            .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
+            .unwrap();
+        let (responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
+        let (responder, r_prk_out) = responder.verify_message_3(cred_i).unwrap();
+
+        assert_eq!(i_prk_out, r_prk_out);
+        assert!(i_prk_out.is_some(), "StatStat derives PRK_out at message_3");
+
+        let mut initiator: EdhocInitiatorDone<_> = initiator.completed_without_message_4().unwrap();
+        let mut responder: EdhocResponderDone<_> = responder.completed_without_message_4().unwrap();
+
+        let mut i_secret = [0; 16];
+        initiator.edhoc_exporter(0u8, &[], &mut i_secret);
+        let mut r_secret = [0; 16];
+        responder.edhoc_exporter(0u8, &[], &mut r_secret);
+        assert_eq!(i_secret, r_secret);
     }
 
     #[cfg(feature = "test-ead-none")]
@@ -1737,6 +1803,8 @@ mod test {
             .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
             .expect("the initiator signs MAC_3 with ML-DSA and prepends kem.ct_R");
 
+        let i_prk_out = i_prk_out.expect("§3.2's initiator only signs, so PRK_out lands here");
+
         (initiator, i_prk_out, message_3, cred_i, responder)
     }
 
@@ -1768,6 +1836,7 @@ mod test {
         let (responder, r_prk_out) = responder
             .verify_message_3(cred_i)
             .expect("the responder verifies SIGNATURE_3 with ML-DSA");
+        let r_prk_out = r_prk_out.expect("§3.2's initiator only signs, so PRK_out lands here");
 
         assert_eq!(i_prk_out, r_prk_out);
         assert_eq!(initiator.state.prk_out, r_prk_out);
@@ -1960,11 +2029,12 @@ mod test {
         let (initiator, message_3, prk_out) = initiator
             .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
             .unwrap();
+        let prk_out = prk_out.expect("§3.2 derives PRK_out at message_3");
         let (th_4, prk_exporter) = (initiator.state.th_4, initiator.state.prk_exporter);
 
         let (responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
         let (responder, r_prk_out) = responder.verify_message_3(cred_i.clone()).unwrap();
-        assert_eq!(prk_out, r_prk_out);
+        assert_eq!(Some(prk_out), r_prk_out);
         let (mut responder, message_4) = responder.prepare_message_4(&EadItems::new()).unwrap();
         let (mut initiator, _ead_4) = initiator.process_message_4(&message_4).unwrap();
 

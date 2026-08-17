@@ -193,6 +193,9 @@ impl PyEdhocInitiator {
             cred_transfer,
             &ead_3,
         )?;
+        // As in the C API: the methods that only derive PRK_out at message_4 are not exposed
+        // here, and this signature has no way to report "no key yet".
+        let prk_out = prk_out.ok_or(EDHOCError::UnsupportedMethod)?;
         self.wait_m4 = Some(state);
         Ok((
             PyBytes::new(py, message_3.as_slice()),

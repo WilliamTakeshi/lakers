@@ -444,7 +444,7 @@ pub fn r_verify_message_3(
     state: &ProcessingM3,
     crypto: &mut impl CryptoTrait,
     valid_cred_i: Credential,
-) -> Result<(ProcessedM3, BytesHashLen), EDHOCError> {
+) -> Result<(ProcessedM3, Option<BytesHashLen>), EDHOCError> {
     let verified = match &state.method_specifics {
         ProcessingM3MethodSpecifics::Signature {
             signature_3,
@@ -467,17 +467,16 @@ pub fn r_verify_message_3(
         }
     };
 
-    let mut prk_out: BytesHashLen = Default::default();
-    edhoc_kdf(
-        crypto,
-        &verified.prk_4e3m,
-        7u8,
-        &verified.th_4,
-        &mut prk_out,
-    );
+    #[cfg(feature = "pq")]
+    let timing = prk_out_timing_r(&state.method_specifics);
+    #[cfg(not(feature = "pq"))]
+    let timing = PrkOutTiming::AtMessage3;
 
-    let mut prk_exporter = BytesHashLen::default();
-    edhoc_kdf(crypto, &prk_out, 10u8, &[], &mut prk_exporter);
+    let (prk_out, prk_exporter) = match timing {
+        PrkOutTiming::AtMessage3 => derive_prk_out(crypto, &verified.prk_4e3m, &verified.th_4),
+        // Nothing to derive from yet: ss_I arrives in message_4.
+        PrkOutTiming::AtMessage4 => (BytesHashLen::default(), BytesHashLen::default()),
+    };
 
     Ok((
         ProcessedM3 {
@@ -485,9 +484,52 @@ pub fn r_verify_message_3(
             th_4: verified.th_4,
             prk_out,
             prk_exporter,
+            #[cfg(feature = "pq")]
+            prk_out_timing: timing,
         },
-        prk_out,
+        match timing {
+            PrkOutTiming::AtMessage3 => Some(prk_out),
+            PrkOutTiming::AtMessage4 => None,
+        },
     ))
+}
+
+/// `PRK_out = EDHOC-KDF(PRK_4e3m, 7, TH_4)` and `PRK_exporter = EDHOC-KDF(PRK_out, 10, "")`.
+///
+/// Extracted because the derivation now happens at one of two points depending on the method,
+/// and the two call sites must not drift apart.
+fn derive_prk_out(
+    crypto: &mut impl CryptoTrait,
+    prk_4e3m: &BytesHashLen,
+    th_4: &BytesHashLen,
+) -> (BytesHashLen, BytesHashLen) {
+    let mut prk_out: BytesHashLen = Default::default();
+    edhoc_kdf(crypto, prk_4e3m, 7u8, th_4, &mut prk_out);
+
+    let mut prk_exporter: BytesHashLen = Default::default();
+    edhoc_kdf(crypto, &prk_out, 10u8, &[], &mut prk_exporter);
+
+    (prk_out, prk_exporter)
+}
+
+#[cfg(feature = "pq")]
+fn prk_out_timing_i(specifics: &ProcessedM2MethodSpecifics) -> PrkOutTiming {
+    match specifics {
+        ProcessedM2MethodSpecifics::Pq { i_mode, .. } if i_mode.uses_kem() => {
+            PrkOutTiming::AtMessage4
+        }
+        _ => PrkOutTiming::AtMessage3,
+    }
+}
+
+#[cfg(feature = "pq")]
+fn prk_out_timing_r(specifics: &ProcessingM3MethodSpecifics) -> PrkOutTiming {
+    match specifics {
+        ProcessingM3MethodSpecifics::Pq { i_mode, .. } if i_mode.uses_kem() => {
+            PrkOutTiming::AtMessage4
+        }
+        _ => PrkOutTiming::AtMessage3,
+    }
 }
 
 pub fn r_prepare_message_4(
@@ -509,7 +551,17 @@ pub fn r_prepare_message_4(
     ))
 }
 
+/// Finish without message_4.
+///
+/// Not available to a method whose `PRK_out` waits on message_4: skipping it would leave both
+/// roles without an output key at all, so message_4 is mandatory there rather than optional.
 pub fn r_complete_without_message_4(state: &ProcessedM3) -> Result<Completed, EDHOCError> {
+    #[cfg(feature = "pq")]
+    if state.prk_out_timing == PrkOutTiming::AtMessage4 {
+        // FIXME: the error is not accurate. message_4 is mandatory, not the method unsupported.
+        return Err(EDHOCError::UnsupportedMethod);
+    }
+
     Ok(Completed {
         prk_out: state.prk_out,
         prk_exporter: state.prk_exporter,
@@ -700,7 +752,7 @@ pub fn i_prepare_message_3(
     cred_i: Credential,
     cred_transfer: CredentialTransfer,
     ead_3: &EadItems,
-) -> Result<(WaitM4, BufferMessage3, BytesHashLen), EDHOCError> {
+) -> Result<(WaitM4, BufferMessage3, Option<BytesHashLen>), EDHOCError> {
     let prepared = match state.method_specifics {
         ProcessedM2MethodSpecifics::Signature { .. } => {
             i_prepare_message_3_sig(state, crypto, cred_i, cred_transfer, ead_3)?
@@ -717,11 +769,16 @@ pub fn i_prepare_message_3(
         }
     };
 
-    let mut prk_out: BytesHashLen = Default::default();
-    edhoc_kdf(crypto, &state.prk_4e3m, 7u8, &prepared.th_4, &mut prk_out);
+    #[cfg(feature = "pq")]
+    let timing = prk_out_timing_i(&state.method_specifics);
+    #[cfg(not(feature = "pq"))]
+    let timing = PrkOutTiming::AtMessage3;
 
-    let mut prk_exporter: BytesHashLen = Default::default();
-    edhoc_kdf(crypto, &prk_out, 10u8, &[], &mut prk_exporter);
+    let (prk_out, prk_exporter) = match timing {
+        PrkOutTiming::AtMessage3 => derive_prk_out(crypto, &state.prk_4e3m, &prepared.th_4),
+        // Nothing to derive from yet: ss_I arrives in message_4.
+        PrkOutTiming::AtMessage4 => (BytesHashLen::default(), BytesHashLen::default()),
+    };
 
     Ok((
         WaitM4 {
@@ -729,9 +786,14 @@ pub fn i_prepare_message_3(
             th_4: prepared.th_4,
             prk_out,
             prk_exporter,
+            #[cfg(feature = "pq")]
+            prk_out_timing: timing,
         },
         prepared.message_3,
-        prk_out,
+        match timing {
+            PrkOutTiming::AtMessage3 => Some(prk_out),
+            PrkOutTiming::AtMessage4 => None,
+        },
     ))
 }
 
@@ -757,7 +819,14 @@ pub fn i_process_message_4(
     }
 }
 
+/// The Initiator's twin of [`r_complete_without_message_4`], with the same restriction.
 pub fn i_complete_without_message_4(state: &WaitM4) -> Result<Completed, EDHOCError> {
+    #[cfg(feature = "pq")]
+    if state.prk_out_timing == PrkOutTiming::AtMessage4 {
+        // FIXME: the error is not accurate. message_4 is mandatory, not the method unsupported.
+        return Err(EDHOCError::UnsupportedMethod);
+    }
+
     Ok(Completed {
         prk_out: state.prk_out,
         prk_exporter: state.prk_exporter,

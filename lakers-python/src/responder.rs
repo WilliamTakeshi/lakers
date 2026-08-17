@@ -204,6 +204,7 @@ impl PyEdhocResponder {
             &mut default_crypto(),
             valid_cred_i,
         )?;
+        let prk_out = prk_out.ok_or(EDHOCError::UnsupportedMethod)?;
         self.processed_m3 = Some(state);
         Ok(PyBytes::new(py, prk_out.as_slice()))
     }

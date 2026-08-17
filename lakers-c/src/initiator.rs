@@ -227,6 +227,11 @@ pub unsafe extern "C" fn initiator_prepare_message_3(
         &ead_3,
     ) {
         Ok((state, msg_3, prk_out)) => {
+            // A method that only derives PRK_out at message_4 has no key to report here, and
+            // this API has no way to say so. None of them are reachable through it.
+            let Some(prk_out) = prk_out else {
+                return EDHOCError::UnsupportedMethod as i8;
+            };
             (*initiator_c).wait_m4 = state;
             *message_3 = msg_3;
             *prk_out_c = prk_out;
@@ -334,12 +339,12 @@ mod tests {
             ),
             processing_m2: ProcessingM2C::default(),
             processed_m2: ProcessedM2C::default(),
-            wait_m4: WaitM4 {
-                prk_4e3m: Default::default(),
-                th_4: Default::default(),
-                prk_out: Default::default(),
-                prk_exporter: Default::default(),
-            },
+            wait_m4: WaitM4::new_at_message_3(
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ),
             cred_i: core::ptr::null_mut(),
             completed: Completed {
                 prk_out: Default::default(),

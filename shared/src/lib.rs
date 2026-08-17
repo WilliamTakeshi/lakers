@@ -952,12 +952,34 @@ pub struct ProcessingM3 {
     pub ead_3: EadItems,
 }
 
+/// When `PRK_out` becomes derivable.
+///
+/// RFC 9528 derives it at message_3, because `PRK_4e3m` is complete there. A post-quantum
+/// method whose Initiator authenticates by KEM cannot: `PRK_4e3m` needs `ss_I`, and `ss_I`
+/// only exists once the Responder has encapsulated to the Initiator's static KEM key and sent
+/// `kem.ct_I` in message_4.
+///
+/// While this says `AtMessage4`, the `prk_out` and `prk_exporter` fields beside it are not yet
+/// meaningful. Nothing can read them: every path that hands out a [`Completed`] checks this
+/// first, and message_4 processing overwrites them before it does.
+///
+/// The type is always defined so that the protocol code has one shape; only the *fields* that
+/// hold it are behind `pq`, since adding one would change `WaitM4`'s C ABI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub enum PrkOutTiming {
+    AtMessage3,
+    AtMessage4,
+}
+
 #[derive(Debug)]
 pub struct ProcessedM3 {
     pub prk_4e3m: BytesHashLen,
     pub th_4: BytesHashLen,
     pub prk_out: BytesHashLen,
     pub prk_exporter: BytesHashLen,
+    #[cfg(feature = "pq")]
+    pub prk_out_timing: PrkOutTiming,
 }
 
 #[derive(Debug)]
@@ -967,6 +989,31 @@ pub struct WaitM4 {
     pub th_4: BytesHashLen,
     pub prk_out: BytesHashLen,
     pub prk_exporter: BytesHashLen,
+    #[cfg(feature = "pq")]
+    pub prk_out_timing: PrkOutTiming,
+}
+
+impl WaitM4 {
+    /// Construct for a method that derives `PRK_out` at message_3 -- every classical method,
+    /// and §3.2.
+    ///
+    /// Prefer this over a struct literal: it keeps callers, including the binding crates,
+    /// working when a feature adds a field.
+    pub fn new_at_message_3(
+        prk_4e3m: BytesHashLen,
+        th_4: BytesHashLen,
+        prk_out: BytesHashLen,
+        prk_exporter: BytesHashLen,
+    ) -> Self {
+        Self {
+            prk_4e3m,
+            th_4,
+            prk_out,
+            prk_exporter,
+            #[cfg(feature = "pq")]
+            prk_out_timing: PrkOutTiming::AtMessage3,
+        }
+    }
 }
 
 #[derive(Debug)]
