@@ -65,6 +65,10 @@ struct VerifiedPeerMessage2 {
     /// only signs.
     #[cfg(feature = "pq")]
     kem_ct_r: Option<BytesKemCiphertext>,
+    /// §3.4 only: what the Responder's `MAC_2` will be checked against once message_4 brings
+    /// it. `None` whenever the Responder has already authenticated itself.
+    #[cfg(feature = "pq")]
+    deferred_mac_2: Option<PqDeferredMac2>,
 }
 #[derive(Debug)]
 struct PreparedMessage3 {
@@ -727,6 +731,7 @@ pub fn i_verify_message_2(
         prk_3e2m,
         th_3,
         kem_ct_r,
+        deferred_mac_2,
     } = peer_verified;
 
     let (prk_4e3m, method_specifics) = match &i {
@@ -755,6 +760,7 @@ pub fn i_verify_message_2(
                     kem_ct_r,
                     dsa_sk: identity.dsa_sk().copied(),
                     kem_dk: identity.kem_dk().copied(),
+                    deferred_mac_2,
                 },
             )
         }
@@ -1109,6 +1115,26 @@ fn encode_plaintext_4(ead_4: &EadItems) -> Result<BufferPlaintext4, EDHOCError> 
     Ok(plaintext_4)
 }
 
+/// `PLAINTEXT_4 = (MAC_2, ?EAD_4)` for §3.4, and RFC 9528's `?EAD_4` for everything else.
+#[cfg(feature = "pq")]
+fn encode_plaintext_4_pq(
+    mac_2: Option<&BytesMac2>,
+    ead_4: &EadItems,
+) -> Result<BufferPlaintext4, EDHOCError> {
+    let mut plaintext_4: BufferPlaintext4 = BufferPlaintext4::new();
+
+    if let Some(mac_2) = mac_2 {
+        encode_bstr_header(&mut plaintext_4, mac_2.len())?;
+        plaintext_4
+            .extend_from_slice(mac_2)
+            .map_err(|_| EDHOCError::EncodingError)?;
+    }
+
+    ead_4.encode(&mut plaintext_4)?;
+
+    Ok(plaintext_4)
+}
+
 fn build_external_aad(
     th_3: &[u8],
     psk_fields: Option<(&[u8], &[u8], &[u8])>,
@@ -1369,7 +1395,7 @@ pub(crate) fn encrypt_message_3_pq(
 /// the AEAD is derived *from* this ciphertext, so it cannot be an argument to the function
 /// that reads it.
 #[cfg(feature = "pq")]
-fn strip_kem_ct(
+pub(crate) fn strip_kem_ct(
     message: &EdhocMessageBuffer,
 ) -> Result<(BytesKemCiphertext, EdhocMessageBuffer), EDHOCError> {
     let (bytestring_length, prefix_length) = decode_bstr_header(message.as_slice())?;
@@ -1412,7 +1438,7 @@ fn prepend_kem_ct(
 /// when the Initiator authenticates by KEM, and RFC 9528's single `bstr` otherwise. Also the
 /// suite's 16-byte AEAD tag, where the classical path uses 8.
 #[cfg(feature = "pq")]
-fn encrypt_message_4_pq(
+pub(crate) fn encrypt_message_4_pq(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
     th_4: &BytesHashLen,
@@ -1604,9 +1630,13 @@ fn compute_mac_2<const N: usize>(
     edhoc_kdf_owned(crypto, prk_3e2m, 2_u8, context.as_slice())
 }
 
+/// `PLAINTEXT_2 = (C_R, ?ID_CRED_R, ?Signature_or_MAC_2, ?EAD_2)`.
+///
+/// The authenticator is optional independently of `ID_CRED_R` for §3.4's KEM-only Responder,
+/// which has nothing to authenticate with at message_2 but must still say which key it is.
 fn encode_plaintext_2(
     c_r: ConnId,
-    stat_fields: Option<(&[u8], &SignatureOrMac)>,
+    stat_fields: Option<(&[u8], Option<&SignatureOrMac>)>,
     ead_2: &EadItems,
 ) -> Result<BufferPlaintext2, EDHOCError> {
     let mut plaintext_2: BufferPlaintext2 = BufferPlaintext2::new();
@@ -1617,13 +1647,15 @@ fn encode_plaintext_2(
         .or(Err(EDHOCError::EncodingError))?;
 
     if let Some((id_cred_r, sig_or_mac_2)) = stat_fields {
-        let sig_or_mac_2 = sig_or_mac_2.as_slice();
         plaintext_2
             .extend_from_slice(id_cred_r)
             .or(Err(EDHOCError::EncodingError))?;
 
-        encode_bstr_header(&mut plaintext_2, sig_or_mac_2.len())?;
-        plaintext_2.extend_from_slice(&sig_or_mac_2).unwrap();
+        if let Some(sig_or_mac_2) = sig_or_mac_2 {
+            let sig_or_mac_2 = sig_or_mac_2.as_slice();
+            encode_bstr_header(&mut plaintext_2, sig_or_mac_2.len())?;
+            plaintext_2.extend_from_slice(&sig_or_mac_2).unwrap();
+        }
     }
 
     // Encode optional EAD_2
@@ -2730,7 +2762,7 @@ mod tests {
                 IdCred::from_full_value(&ID_CRED_R_TV[..])
                     .unwrap()
                     .as_encoded_value(),
-                &MAC_2_TV.into(),
+                Some(&MAC_2_TV.into()),
             )),
             &EadItems::new(),
         )
@@ -2957,7 +2989,7 @@ mod tests {
         let id_cred_r = IdCred::from_full_value(&ID_CRED_R_TV[..]).unwrap();
         let plaintext_2 = encode_plaintext_2(
             C_R_TV,
-            Some((id_cred_r.as_encoded_value(), &signature.into())),
+            Some((id_cred_r.as_encoded_value(), Some(&signature.into()))),
             &EadItems::new(),
         )
         .unwrap();
@@ -3336,8 +3368,12 @@ mod rfc9529_method0 {
 
     #[test]
     fn plaintext_2_matches() {
-        let plaintext_2 =
-            encode_plaintext_2(c_r(), Some((ID_CRED_R, &SIG_2.into())), &EadItems::new()).unwrap();
+        let plaintext_2 = encode_plaintext_2(
+            c_r(),
+            Some((ID_CRED_R, Some(&SIG_2.into()))),
+            &EadItems::new(),
+        )
+        .unwrap();
         assert_eq!(plaintext_2.as_slice(), PLAINTEXT_2);
     }
 

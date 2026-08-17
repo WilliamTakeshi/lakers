@@ -22,18 +22,20 @@
 
 use super::{
     compute_mac_2, compute_mac_3, compute_salt_3e2m, compute_salt_4e3m, compute_th_3, compute_th_4,
-    decode_plaintext_4, decrypt_message_3_pq, decrypt_message_4_pq, encode_plaintext_2,
-    encode_plaintext_3, encode_plaintext_4, encode_sig_structure, encrypt_message_3_pq,
-    encrypt_message_4_pq, strip_kem_ct, BufferMessage3, BufferMessage4, BytesHashLen, BytesMacSig,
-    ConnId, Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
-    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PqMessage4I, PqMessage4R,
-    PreparedMessage2, PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessedM3,
-    ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, Th4Input,
-    VerifiedMessage3, VerifiedPeerMessage2, WaitM3, WaitM3MethodSpecifics, WaitM4,
+    decrypt_message_3_pq, decrypt_message_4_pq, encode_plaintext_2, encode_plaintext_3,
+    encode_plaintext_4_pq, encode_sig_structure, encrypt_message_3_pq, encrypt_message_4_pq,
+    strip_kem_ct, BufferMessage3, BufferMessage4, BytesHashLen, BytesMac2, BytesMacSig, ConnId,
+    Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
+    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PqDeferredMac2, PqMessage4I,
+    PqMessage4R, PreparedMessage2, PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics,
+    ProcessedM3, ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3,
+    ProcessingM3MethodSpecifics, SignatureOrMac, Th4Input, VerifiedMessage3, VerifiedPeerMessage2,
+    WaitM3, WaitM3MethodSpecifics, WaitM4,
 };
 use lakers_shared::{
-    decode_plaintext_2_pqsig, decode_plaintext_3_pqsig, BytesKemDecapsKey, BytesKemEncapsKey,
-    BytesPqSignKey, BytesPqVerifyKey, PqAuthMode,
+    decode_plaintext_2_no_auth, decode_plaintext_2_pqsig, decode_plaintext_3_pqsig,
+    decode_plaintext_4_pq, BytesKemDecapsKey, BytesKemEncapsKey, BytesPqSignKey, BytesPqVerifyKey,
+    PqAuthMode,
 };
 
 /// A peer's public key material, split out of its credential according to its mode.
@@ -113,16 +115,27 @@ pub(crate) fn r_prepare_message_2_pq(
         None
     };
 
-    let plaintext_2 = match &signature_2 {
-        Some(signature_2) => encode_plaintext_2(
-            c_r,
-            Some((id_cred_r.as_encoded_value(), &(*signature_2).into())),
-            ead_2,
-        )?,
-        None => encode_plaintext_2(c_r, None, ead_2)?,
-    };
+    // ID_CRED_R goes out either way. §3.4 has no authenticator to put beside it, but the
+    // Initiator still needs to know which static key to encapsulate to.
+    let sig_or_mac_2: Option<SignatureOrMac> = signature_2.map(|s| s.into());
+    let plaintext_2 = encode_plaintext_2(
+        c_r,
+        Some((id_cred_r.as_encoded_value(), sig_or_mac_2.as_ref())),
+        ead_2,
+    )?;
 
     let th_3 = compute_th_3(crypto, th_2, &plaintext_2, Some(cred_r.bytes.as_slice()));
+
+    // §3.4: MAC_2 is keyed by PRK_4e3m, which does not exist until message_4, so its inputs
+    // have to survive until then.
+    let deferred_mac_2 = match r_mode.signs() {
+        true => None,
+        false => Some(PqDeferredMac2::new(
+            c_r,
+            id_cred_r.as_full_value(),
+            cred_r.bytes.as_slice(),
+        )?),
+    };
 
     Ok(PreparedMessage2 {
         plaintext_2,
@@ -136,6 +149,7 @@ pub(crate) fn r_prepare_message_2_pq(
             prk_2e: *prk_2e,
             th_2: *th_2,
             kem_dk: kem_dk.copied(),
+            deferred_mac_2,
         },
     })
 }
@@ -161,6 +175,7 @@ pub(crate) fn r_parse_message_3_pq(
         prk_2e,
         th_2,
         kem_dk,
+        deferred_mac_2,
     } = &state.method_specifics
     else {
         // FIXME: not an error so much as a lack of agreement between peers.
@@ -189,6 +204,7 @@ pub(crate) fn r_parse_message_3_pq(
             i_mode: *i_mode,
             signature_3,
             id_cred_i: id_cred_i.clone(),
+            deferred_mac_2: deferred_mac_2.clone(),
         },
         id_cred: id_cred_i,
         plaintext_3,
@@ -216,7 +232,7 @@ pub(crate) fn i_parse_message_2_pq(
     } else {
         // §3.4: PLAINTEXT_2 carries no authenticator at all, but still an ID_CRED_R -- the
         // Initiator needs it to know which key to encapsulate to.
-        let (c_r, id_cred_r, _mac, ead_2) = lakers_shared::decode_plaintext_2(plaintext_2)?;
+        let (c_r, id_cred_r, ead_2) = decode_plaintext_2_no_auth(plaintext_2)?;
         Ok(DecodedMessage2 {
             method_specifics: ProcessingM2MethodSpecifics::Pq {
                 r_mode,
@@ -304,6 +320,15 @@ pub(crate) fn i_verify_message_2_pq(
         prk_3e2m,
         th_3,
         kem_ct_r,
+        // §3.4: the Responder's MAC_2 is still to come, in message_4.
+        deferred_mac_2: match r_mode.signs() {
+            true => None,
+            false => Some(PqDeferredMac2::new(
+                state.c_r,
+                id_cred_r.as_full_value(),
+                valid_cred_r.bytes.as_slice(),
+            )?),
+        },
     })
 }
 
@@ -326,6 +351,7 @@ pub(crate) fn i_prepare_message_3_pq(
         kem_ct_r,
         dsa_sk,
         kem_dk,
+        deferred_mac_2,
     } = &state.method_specifics
     else {
         // FIXME: not an error so much as a lack of agreement between peers.
@@ -341,6 +367,7 @@ pub(crate) fn i_prepare_message_3_pq(
         Some(PqMessage4I {
             salt_4e3m: compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3),
             kem_dk: *kem_dk.as_ref().ok_or(EDHOCError::MissingIdentity)?,
+            deferred_mac_2: deferred_mac_2.clone(),
         })
     } else {
         None
@@ -412,6 +439,7 @@ pub(crate) fn r_verify_message_3_pq(
         i_mode,
         signature_3,
         id_cred_i,
+        deferred_mac_2,
     } = &state.method_specifics
     else {
         // FIXME: not an error so much as a lack of agreement between peers.
@@ -432,6 +460,7 @@ pub(crate) fn r_verify_message_3_pq(
         Some(PqMessage4R {
             salt_4e3m: compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3),
             kem_ek: kem_pk.ok_or(EDHOCError::UnsupportedMethod)?,
+            deferred_mac_2: deferred_mac_2.clone(),
         })
     } else {
         None
@@ -491,7 +520,14 @@ pub(crate) fn r_prepare_message_4_pq(
     let (ss_i, kem_ct_i) = crypto.kem_encapsulate(&pq.kem_ek)?;
     let prk_4e3m = crypto.hkdf_extract(&pq.salt_4e3m, &ss_i);
 
-    let plaintext_4 = encode_plaintext_4(ead_4)?;
+    // §3.4: this is the first moment the Responder can authenticate itself at all, so MAC_2
+    // rides inside CIPHERTEXT_4 rather than CIPHERTEXT_2.
+    let mac_2 = pq
+        .deferred_mac_2
+        .as_ref()
+        .map(|d| deferred_mac_2(crypto, &prk_4e3m, d, &state.th_4, ead_4));
+
+    let plaintext_4 = encode_plaintext_4_pq(mac_2.as_ref(), ead_4)?;
     let message_4 = encrypt_message_4_pq(
         crypto,
         &prk_4e3m,
@@ -518,7 +554,43 @@ pub(crate) fn i_process_message_4_pq(
     let prk_4e3m = crypto.hkdf_extract(&pq.salt_4e3m, &ss_i);
 
     let plaintext_4 = decrypt_message_4_pq(crypto, &prk_4e3m, &state.th_4, &ciphertext_part)?;
-    let ead_4 = decode_plaintext_4(&plaintext_4)?;
+    let (mac_2, ead_4) = decode_plaintext_4_pq(&plaintext_4, pq.deferred_mac_2.is_some())?;
+
+    // §3.4: until this check passes the Responder has not authenticated itself at any point in
+    // the exchange -- see D11. Note the order: EAD_4 is an input to MAC_2, so it has to be
+    // decoded before the MAC can be recomputed, and is therefore read from an as-yet
+    // unauthenticated peer. CIPHERTEXT_4's AEAD tag has already passed, which is what makes
+    // that safe.
+    if let Some(d) = pq.deferred_mac_2.as_ref() {
+        let expected = deferred_mac_2(crypto, &prk_4e3m, d, &state.th_4, &ead_4);
+        if mac_2.ok_or(EDHOCError::ParsingError)? != expected {
+            return Err(EDHOCError::MacVerificationFailed);
+        }
+    }
 
     Ok((prk_4e3m, ead_4))
+}
+
+/// §3.4's `MAC_2 = EDHOC-KDF(PRK_4e3m, 2, (C_R, ID_CRED_R, TH_4, CRED_R, EAD_4), mac_length_2)`.
+///
+/// This is `compute_mac_2` reused verbatim with `TH_4`/`EAD_4` where `TH_2`/`EAD_2` normally
+/// go -- the normalization rule applied one more time: same construction, keyed by the
+/// most-derived PRK available, which here is the only one that exists. The draft's context
+/// omits `CRED_R`; keeping it matches RFC 9528 and the rest of this implementation (see D2).
+fn deferred_mac_2(
+    crypto: &mut impl CryptoTrait,
+    prk_4e3m: &BytesHashLen,
+    d: &PqDeferredMac2,
+    th_4: &BytesHashLen,
+    ead_4: &EadItems,
+) -> BytesMac2 {
+    compute_mac_2(
+        crypto,
+        prk_4e3m,
+        d.c_r,
+        d.id_cred_r.as_slice(),
+        d.cred_r.as_slice(),
+        th_4,
+        ead_4,
+    )
 }

@@ -56,11 +56,17 @@ large_buffers = [
 ## draft-papon-lake-pq-edhoc message_2 or message_3 runs to roughly 3.2 kB --
 ## past every rung `large_buffers` selects. Host-side only: `EdhocBuffer<N>` is
 ## a by-value `[u8; N]`, so this costs several kB of stack per live exchange.
+## Post-quantum message sizes.
+##
+## `max_ead_len_1024` rather than 4096 on purpose: nothing in draft-papon-lake-pq-edhoc §3
+## makes EADs bigger, and `EadItems` holds `MAX_EAD_ITEMS` of them inline. At the 4096 rung it
+## alone is 16 kB, which every protocol state carries and the typestate chain copies -- enough
+## to overflow the stack in tests that drive more than one handshake.
 pq_buffers = [
     "max_message_size_len_4096",
     "max_kdf_content_len_4096",
     "max_buffer_len_4096",
-    "max_ead_len_4096",
+    "max_ead_len_1024",
     "max_cred_len_4096",
     "max_connid_encoded_len_24",
 ]

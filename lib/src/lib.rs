@@ -2278,6 +2278,106 @@ mod test {
         assert_eq!((m1, m2, m3, m4), (808, 3196, 3214, 788));
     }
 
+    /// §3.4 end to end: the Responder authenticates by KEM *alone*, with no signature at any
+    /// point, and the Initiator with a KEM and a signature.
+    ///
+    /// The most unusual of the four. PLAINTEXT_2 carries `ID_CRED_R` and no authenticator --
+    /// there is nothing to key one with, since `ss_R` does not exist until the Initiator
+    /// encapsulates. The Responder's `MAC_2` is keyed by `PRK_4e3m` and travels *inside*
+    /// message_4, so it is not authenticated to the Initiator until the last message. See D11.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_handshake_kemsig_kem() {
+        let (m1, m2, m3, m4) = pq_handshake(EDHOCMethod::PqKemsigKem);
+
+        assert_eq!(m1, 808);
+        // No SIGNATURE_2 at all: bstr header(3) + kem.ct_eph(768) + a CIPHERTEXT_2 that is
+        // just C_R and ID_CRED_R. The one message in all of §3 that stays under a kilobyte,
+        // 2423 bytes smaller than every other variant's message_2.
+        assert_eq!(m2, 773);
+        // message_3 is §3.2's: kem.ct_R in front of a signed PLAINTEXT_3.
+        assert_eq!(m3, 3214);
+        // message_4 is §3.3's 788 plus the 10 bytes of bstr(MAC_2) -- 8 bytes of MAC, its
+        // one-byte header, and one more because CIPHERTEXT_4 crosses 23 bytes and its own
+        // bstr header widens.
+        assert_eq!(m4, 798);
+    }
+
+    /// §3.4's `MAC_2` is the *only* thing binding the Responder to its credential, so the
+    /// check has to be real rather than incidental.
+    ///
+    /// Flipping a bit on the wire proves nothing: CIPHERTEXT_4's AEAD tag catches it first and
+    /// the MAC is never reached. This test instead rebuilds message_4 with a valid tag and a
+    /// wrong `MAC_2`, by recovering `PRK_4e3m` the way the Initiator does -- decapsulating the
+    /// real `kem.ct_I` with the Initiator's own key -- and re-encrypting under it.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_kem_only_responder_rejects_forged_mac_2() {
+        let mut crypto = default_crypto();
+        let (cred_i, i_identity) = pq_material(&mut crypto, PqAuthMode::KemSign, 0x2b);
+        let (cred_r, r_identity) = pq_material(&mut crypto, PqAuthMode::Kem, 0x32);
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqKemsigKem,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let responder = EdhocResponder::new(
+            default_crypto(),
+            ResponderIdentity::Pq(r_identity),
+            cred_r.clone(),
+        );
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        initiator
+            .set_identity(InitiatorIdentity::Pq(i_identity), cred_i.clone())
+            .unwrap();
+        let initiator = initiator.verify_message_2(Some(cred_r)).unwrap();
+        let (initiator, message_3, _) = initiator
+            .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
+            .unwrap();
+        let (responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
+        let (responder, _) = responder.verify_message_3(cred_i).unwrap();
+        let (_responder, message_4) = responder.prepare_message_4(&EadItems::new()).unwrap();
+
+        // The unmodified message_4 must be accepted, or the rest proves nothing.
+        let pq = initiator.state.pq_message_4.clone().unwrap();
+        let th_4 = initiator.state.th_4;
+        let (kem_ct_i, _) = crate::edhoc::strip_kem_ct(&message_4).unwrap();
+        let ss_i = crypto.kem_decapsulate(&pq.kem_dk, &kem_ct_i).unwrap();
+        let prk_4e3m = crypto.hkdf_extract(&pq.salt_4e3m, &ss_i);
+
+        // PLAINTEXT_4 for §3.4 with no EAD is exactly bstr(MAC_2); an all-zero MAC will do.
+        let mut plaintext_4 = BufferPlaintext4::new();
+        plaintext_4.extend_from_slice(&[0x40 + 8]).unwrap();
+        plaintext_4.extend_from_slice(&[0u8; 8]).unwrap();
+
+        let forged = crate::edhoc::encrypt_message_4_pq(
+            &mut crypto,
+            &prk_4e3m,
+            &th_4,
+            &plaintext_4,
+            Some(&kem_ct_i),
+        )
+        .unwrap();
+        assert_eq!(forged.len(), message_4.len(), "same shape, different MAC_2");
+
+        assert_eq!(
+            initiator
+                .process_message_4(&forged)
+                .map(|_| ())
+                .unwrap_err(),
+            EDHOCError::MacVerificationFailed
+        );
+    }
+
     /// The methods that defer `PRK_out` to message_4 must refuse to finish without it: there
     /// would be no output key at all. §3.2 is unaffected and still allows it.
     #[cfg(feature = "pq")]

@@ -208,7 +208,8 @@ const _: () = {
     assert!(MAX_MESSAGE_SIZE_LEN >= 4096);
     assert!(MAX_BUFFER_LEN >= 4096);
     assert!(MAX_KDF_CONTEXT_LEN >= 4096);
-    assert!(MAX_EAD_LEN >= 4096);
+    // EAD deliberately stays at the 1024 rung; see the pq_buffers comment in Cargo.toml.
+    assert!(MAX_EAD_LEN >= 1024);
     assert!(MAX_CRED_LEN >= 4096);
 };
 
@@ -802,6 +803,8 @@ pub enum WaitM3MethodSpecifics {
         prk_2e: BytesHashLen,
         th_2: BytesHashLen,
         kem_dk: Option<BytesKemDecapsKey>,
+        /// Set only for §3.4, where the Responder's own `MAC_2` is still to be sent.
+        deferred_mac_2: Option<PqDeferredMac2>,
     },
 }
 #[derive(Debug)]
@@ -907,6 +910,8 @@ pub enum ProcessedM2MethodSpecifics {
         kem_ct_r: Option<BytesKemCiphertext>,
         dsa_sk: Option<BytesPqSignKey>,
         kem_dk: Option<BytesKemDecapsKey>,
+        /// Set only for §3.4, where `MAC_2` is still to be received and verified.
+        deferred_mac_2: Option<PqDeferredMac2>,
     },
 }
 
@@ -929,20 +934,67 @@ pub struct ProcessedM2 {
 ///
 /// Present exactly for the methods whose Initiator authenticates by KEM: `PRK_4e3m =
 /// Extract(SALT_4e3m, ss_I)` where `ss_I` comes from decapsulating message_4's `kem.ct_I`.
+/// Everything §3.4's deferred `MAC_2` is computed over, apart from `TH_4` and `EAD_4`.
+///
+/// A Responder that authenticates by KEM alone sends no `SIGNATURE_2` and no `MAC_2` in
+/// message_2 -- there is nothing to key one with. Its `MAC_2` is keyed by `PRK_4e3m` and
+/// travels inside message_4, so both roles have to keep its inputs until then.
+/// Upper bound on the two credential values §3.4's deferred `MAC_2` has to keep.
+///
+/// Deliberately not the generic `MAX_CRED_LEN` rung. This material sits inside enums that
+/// every method pays for in a `pq` build -- `ProcessingM3` and friends are moved up the
+/// typestate chain by value -- and §3.4's Responder is KEM-only, so its CCS is one ML-KEM
+/// encapsulation key: 10 bytes of CBOR plus 4 plus 800. A kilobyte covers that with room for
+/// `ID_CRED_R` sent by value, and keeps the enums an order of magnitude smaller than the
+/// 4096-byte rung would.
 #[cfg(feature = "pq")]
-#[derive(Debug, Clone, Copy)]
+pub const MAX_PQ_KEM_CRED_LEN: usize = 1024;
+
+#[cfg(feature = "pq")]
+pub type BufferPqKemCred = EdhocBuffer<MAX_PQ_KEM_CRED_LEN>;
+
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone)]
+pub struct PqDeferredMac2 {
+    pub c_r: ConnId,
+    /// `ID_CRED_R` in its full value form, as `compute_mac_2` wants it.
+    pub id_cred_r: BufferPqKemCred,
+    /// The bytes of `CRED_R`.
+    pub cred_r: BufferPqKemCred,
+}
+
+#[cfg(feature = "pq")]
+impl PqDeferredMac2 {
+    /// Fails if either value is larger than a KEM-only credential should ever be.
+    pub fn new(c_r: ConnId, id_cred_r: &[u8], cred_r: &[u8]) -> Result<Self, EDHOCError> {
+        Ok(Self {
+            c_r,
+            id_cred_r: BufferPqKemCred::new_from_slice(id_cred_r)
+                .map_err(|_| EDHOCError::CredentialTooLongError)?,
+            cred_r: BufferPqKemCred::new_from_slice(cred_r)
+                .map_err(|_| EDHOCError::CredentialTooLongError)?,
+        })
+    }
+}
+
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone)]
 pub struct PqMessage4I {
     pub salt_4e3m: BytesHashLen,
     pub kem_dk: BytesKemDecapsKey,
+    /// Set only for §3.4, where message_4 also carries the Responder's `MAC_2`.
+    pub deferred_mac_2: Option<PqDeferredMac2>,
 }
 
 /// The Responder's twin of [`PqMessage4I`]: it encapsulates rather than decapsulates, so it
 /// holds the Initiator's *public* KEM key, learned from `CRED_I` at message_3.
 #[cfg(feature = "pq")]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PqMessage4R {
     pub salt_4e3m: BytesHashLen,
     pub kem_ek: BytesKemEncapsKey,
+    /// Set only for §3.4; the Responder's twin of [`PqMessage4I::deferred_mac_2`].
+    pub deferred_mac_2: Option<PqDeferredMac2>,
 }
 #[derive(Debug)]
 pub enum ProcessingM3MethodSpecifics {
@@ -969,6 +1021,8 @@ pub enum ProcessingM3MethodSpecifics {
         i_mode: PqAuthMode,
         signature_3: BytesPqSignature,
         id_cred_i: IdCred,
+        /// Set only for §3.4; see [`WaitM3MethodSpecifics::Pq`].
+        deferred_mac_2: Option<PqDeferredMac2>,
     },
 }
 #[derive(Debug)]
@@ -1660,6 +1714,52 @@ mod edhoc_parser {
             }
         } else if decoder.finished() {
             Ok((c_r, id_cred_r, mac_2, EadItems::new()))
+        } else {
+            Err(EDHOCError::ParsingError)
+        }
+    }
+
+    /// §3.4's `PLAINTEXT_2 = (C_R, ID_CRED_R, ?EAD_2)`.
+    ///
+    /// The Responder authenticates by KEM alone, so there is no `SIGNATURE_2` and no `MAC_2`
+    /// to send yet -- but `ID_CRED_R` is still needed, since it tells the Initiator which
+    /// static key to encapsulate to.
+    #[cfg(feature = "pq")]
+    pub fn decode_plaintext_2_no_auth(
+        plaintext_2: &BufferPlaintext2,
+    ) -> Result<(ConnId, IdCred, EadItems), EDHOCError> {
+        let mut decoder = CBORDecoder::new(plaintext_2.as_slice());
+
+        let c_r = ConnId::from_decoder(&mut decoder)?;
+        let id_cred_r = IdCred::from_encoded_value(decoder.any_as_encoded()?)?;
+
+        if plaintext_2.len() > decoder.position() {
+            Ok((c_r, id_cred_r, parse_eads(decoder.remaining_buffer()?)?))
+        } else if decoder.finished() {
+            Ok((c_r, id_cred_r, EadItems::new()))
+        } else {
+            Err(EDHOCError::ParsingError)
+        }
+    }
+
+    /// §3.4's `PLAINTEXT_4 = (MAC_2, ?EAD_4)`, and RFC 9528's `?EAD_4` otherwise.
+    #[cfg(feature = "pq")]
+    pub fn decode_plaintext_4_pq(
+        plaintext_4: &BufferPlaintext4,
+        expect_mac_2: bool,
+    ) -> Result<(Option<BytesMac2>, EadItems), EDHOCError> {
+        if !expect_mac_2 {
+            return Ok((None, decode_plaintext_4(plaintext_4)?));
+        }
+
+        let mut decoder = CBORDecoder::new(plaintext_4.as_slice());
+        let mut mac_2: BytesMac2 = [0; MAC_LENGTH_2];
+        mac_2.copy_from_slice(decoder.bytes_sized(MAC_LENGTH_2)?);
+
+        if plaintext_4.len() > decoder.position() {
+            Ok((Some(mac_2), parse_eads(decoder.remaining_buffer()?)?))
+        } else if decoder.finished() {
+            Ok((Some(mac_2), EadItems::new()))
         } else {
             Err(EDHOCError::ParsingError)
         }
