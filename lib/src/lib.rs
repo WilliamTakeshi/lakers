@@ -1558,28 +1558,53 @@ mod test {
         assert!(both.kem_dk().is_some() && both.dsa_sk().is_some());
     }
 
-    /// Build a §3.2 credential pair: the Responder authenticates with KEM & signature, the
-    /// Initiator with a signature alone.
+    /// A post-quantum CCS: `{ 8: { 1: { 1: 7, 2: h'kid', -1: <ML-DSA pk>, ?-2: <ML-KEM ek> } } }`.
+    ///
+    /// Which keys are present is what makes it a `Sign` or a `KemSign` credential; there is no
+    /// separate mode label to disagree with them.
     #[cfg(feature = "pq")]
-    fn pq_responder_material(crypto: &mut impl CryptoTrait) -> (Credential, ResponderIdentity) {
+    fn pq_ccs(
+        kid: u8,
+        dsa_pk: &BytesPqVerifyKey,
+        kem_ek: Option<&BytesKemEncapsKey>,
+    ) -> Credential {
         use lakers_shared::BufferCred;
 
+        let entries = if kem_ek.is_some() { 0xa4 } else { 0xa3 };
+
+        let mut ccs = BufferCred::new();
+        ccs.extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01, entries, 0x01, 0x07, 0x02, 0x41, kid])
+            .unwrap();
+        ccs.extend_from_slice(&[0x20, 0x59, 0x05, 0x20]).unwrap();
+        ccs.extend_from_slice(dsa_pk).unwrap();
+        if let Some(kem_ek) = kem_ek {
+            ccs.extend_from_slice(&[0x21, 0x59, 0x03, 0x20]).unwrap();
+            ccs.extend_from_slice(kem_ek).unwrap();
+        }
+
+        Credential::parse_ccs(ccs.as_slice()).unwrap()
+    }
+
+    /// §3.2's Responder: authenticates with a KEM *and* a signature.
+    #[cfg(feature = "pq")]
+    fn pq_responder_material(crypto: &mut impl CryptoTrait) -> (Credential, ResponderIdentity) {
         let (kem_dk, kem_ek) = crypto.kem_generate_key_pair().unwrap();
         let (dsa_sk, dsa_pk) = crypto.mldsa_generate_key_pair().unwrap();
 
-        // { 8: { 1: { 1: 7, 2: h'32', -1: <ML-DSA pk>, -2: <ML-KEM ek> } } }
-        let mut ccs = BufferCred::new();
-        ccs.extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01, 0xa4, 0x01, 0x07, 0x02, 0x41, 0x32])
-            .unwrap();
-        ccs.extend_from_slice(&[0x20, 0x59, 0x05, 0x20]).unwrap();
-        ccs.extend_from_slice(&dsa_pk).unwrap();
-        ccs.extend_from_slice(&[0x21, 0x59, 0x03, 0x20]).unwrap();
-        ccs.extend_from_slice(&kem_ek).unwrap();
-
-        let cred_r = Credential::parse_ccs(ccs.as_slice()).unwrap();
         (
-            cred_r,
+            pq_ccs(0x32, &dsa_pk, Some(&kem_ek)),
             ResponderIdentity::Pq(PqIdentity::KemSign { kem_dk, dsa_sk }),
+        )
+    }
+
+    /// §3.2's Initiator: signs only, so its credential carries no KEM key at all.
+    #[cfg(feature = "pq")]
+    fn pq_initiator_material(crypto: &mut impl CryptoTrait) -> (Credential, InitiatorIdentity) {
+        let (dsa_sk, dsa_pk) = crypto.mldsa_generate_key_pair().unwrap();
+
+        (
+            pq_ccs(0x2b, &dsa_pk, None),
+            InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk }),
         )
     }
 
@@ -1676,24 +1701,20 @@ mod test {
         );
     }
 
-    /// Drive §3.2 through message_2 and hand back everything message_3 needs: the Initiator's
-    /// `PRK_3e2m`, `TH_3` and `kem.ct_R`, and the Responder still in `WaitM3`.
-    ///
-    /// The Initiator cannot build message_3 itself yet -- SIGNATURE_3 is the next commit -- so
-    /// the tests below assemble it from these pieces.
+    /// Drive §3.2 to the point where message_3 has been built but not yet parsed, and hand
+    /// back both roles plus the message and the Initiator's `PRK_out`.
     #[cfg(feature = "pq")]
     #[cfg(feature = "test-ead-none")]
-    fn pq_up_to_message_3() -> (
+    fn pq_sig_kemsig_to_message_3() -> (
+        EdhocInitiatorWaitM4<lakers_crypto::Crypto>,
         BytesHashLen,
-        BytesHashLen,
-        BytesKemCiphertext,
+        BufferMessage3,
         Credential,
         EdhocResponderWaitM3<lakers_crypto::Crypto>,
     ) {
         let mut crypto = default_crypto();
         let (cred_r, r_identity) = pq_responder_material(&mut crypto);
-        let (dsa_sk_i, _) = crypto.mldsa_generate_key_pair().unwrap();
-        let cred_i = Credential::parse_ccs(CRED_I.try_into().unwrap()).unwrap();
+        let (cred_i, i_identity) = pq_initiator_material(&mut crypto);
 
         let initiator = EdhocInitiator::new(
             default_crypto(),
@@ -1709,92 +1730,72 @@ mod test {
             .unwrap();
 
         let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
-        initiator
-            .set_identity(
-                InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk: dsa_sk_i }),
-                cred_i.clone(),
-            )
-            .unwrap();
+        initiator.set_identity(i_identity, cred_i.clone()).unwrap();
         let initiator = initiator.verify_message_2(Some(cred_r)).unwrap();
 
-        let ProcessedM2MethodSpecifics::Pq { kem_ct_r, .. } = &initiator.state.method_specifics
-        else {
-            panic!("method 40 is a post-quantum method");
-        };
-        let kem_ct_r = kem_ct_r.expect("the responder of method 40 authenticates by KEM");
+        let (initiator, message_3, i_prk_out) = initiator
+            .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
+            .expect("the initiator signs MAC_3 with ML-DSA and prepends kem.ct_R");
 
-        (
-            initiator.state.prk_3e2m,
-            initiator.state.th_3,
-            kem_ct_r,
-            cred_i,
-            responder,
-        )
+        (initiator, i_prk_out, message_3, cred_i, responder)
     }
 
-    /// A stand-in PLAINTEXT_3: `ID_CRED_I` by reference followed by an ML-DSA-44-width
-    /// authenticator. Built by hand rather than through `encode_plaintext_3` so that the test
-    /// pins the bytes the decoder is expected to accept.
-    #[cfg(feature = "pq")]
-    #[cfg(feature = "test-ead-none")]
-    fn pq_dummy_plaintext_3(cred_i: &Credential) -> BufferPlaintext3 {
-        let mut plaintext_3 = BufferPlaintext3::new();
-        plaintext_3
-            .extend_from_slice(cred_i.by_kid().unwrap().as_encoded_value())
-            .unwrap();
-        // bstr header for 2420 bytes, then the signature itself.
-        plaintext_3
-            .extend_from_slice(&[
-                0x59,
-                (PQ_SIGNATURE_LENGTH >> 8) as u8,
-                (PQ_SIGNATURE_LENGTH & 0xff) as u8,
-            ])
-            .unwrap();
-        plaintext_3
-            .extend_from_slice(&[0xa5u8; PQ_SIGNATURE_LENGTH])
-            .unwrap();
-        plaintext_3
-    }
-
-    /// The Responder's `PRK_3e2m` only exists once it has decapsulated the `kem.ct_R` that
-    /// rides on message_3 -- a message later than RFC 9528 derives it. This is the test that
-    /// the two roles land on the same key across that gap.
+    /// §3.2 end to end. Both roles reach the same `PRK_out` despite deriving `PRK_3e2m` one
+    /// message apart, which is the whole point of the variant.
     #[cfg(feature = "pq")]
     #[cfg(feature = "test-ead-none")]
     #[test]
-    fn test_pq_message_3_carries_kem_ct_r() {
-        let (i_prk_3e2m, i_th_3, kem_ct_r, cred_i, responder) = pq_up_to_message_3();
-        let plaintext_3 = pq_dummy_plaintext_3(&cred_i);
-
-        let message_3 = crate::edhoc::encrypt_message_3_pq(
-            &mut default_crypto(),
-            &i_prk_3e2m,
-            &i_th_3,
-            &plaintext_3,
-            Some(&kem_ct_r),
-        )
-        .unwrap();
+    fn test_pq_handshake_sig_kemsig() {
+        let (initiator, i_prk_out, message_3, cred_i, responder) = pq_sig_kemsig_to_message_3();
 
         // bstr(kem.ct_R) with the two-byte length header, then bstr(CIPHERTEXT_3).
         assert_eq!(&message_3.as_slice()[..3], &[0x59, 0x03, 0x00]);
-        assert_eq!(
-            &message_3.as_slice()[3..3 + ML_KEM_CIPHERTEXT_LEN],
-            &kem_ct_r[..]
+        assert!(
+            message_3.len() > ML_KEM_CIPHERTEXT_LEN + PQ_SIGNATURE_LENGTH,
+            "message_3 was {} bytes",
+            message_3.len()
         );
 
         let (responder, id_cred_i, _ead_3) = responder
             .parse_message_3(&message_3)
             .expect("the responder decapsulates kem.ct_R and only then decrypts CIPHERTEXT_3");
-
-        assert_eq!(
-            responder.state.prk_3e2m, i_prk_3e2m,
-            "PRK_3e2m must agree even though the two roles derive it one message apart"
-        );
         assert_eq!(
             id_cred_i.as_encoded_value(),
             cred_i.by_kid().unwrap().as_encoded_value()
         );
-        assert_eq!(responder.state.plaintext_3, plaintext_3);
+
+        let (_responder, r_prk_out) = responder
+            .verify_message_3(cred_i)
+            .expect("the responder verifies SIGNATURE_3 with ML-DSA");
+
+        assert_eq!(i_prk_out, r_prk_out);
+        assert_eq!(initiator.state.prk_out, r_prk_out);
+    }
+
+    /// A tampered SIGNATURE_3 must be rejected. The bit is flipped inside PLAINTEXT_3 rather
+    /// than on the wire, since CIPHERTEXT_3's AEAD tag would otherwise catch it first and the
+    /// ML-DSA verification would never run.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_handshake_rejects_tampered_signature_3() {
+        let (_initiator, _i_prk_out, message_3, cred_i, responder) = pq_sig_kemsig_to_message_3();
+
+        let (mut responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
+        #[allow(deprecated)]
+        {
+            let ProcessingM3MethodSpecifics::Pq { signature_3, .. } =
+                &mut responder.state.method_specifics
+            else {
+                panic!("method 40 is a post-quantum method");
+            };
+            signature_3[0] ^= 0x01;
+        }
+
+        assert_eq!(
+            responder.verify_message_3(cred_i).map(|_| ()).unwrap_err(),
+            EDHOCError::MacVerificationFailed
+        );
     }
 
     /// ML-KEM decapsulation never reports failure -- implicit rejection returns an
@@ -1804,17 +1805,7 @@ mod test {
     #[cfg(feature = "test-ead-none")]
     #[test]
     fn test_pq_message_3_tampered_kem_ct_r_fails_at_the_aead() {
-        let (i_prk_3e2m, i_th_3, kem_ct_r, cred_i, responder) = pq_up_to_message_3();
-        let plaintext_3 = pq_dummy_plaintext_3(&cred_i);
-
-        let mut message_3 = crate::edhoc::encrypt_message_3_pq(
-            &mut default_crypto(),
-            &i_prk_3e2m,
-            &i_th_3,
-            &plaintext_3,
-            Some(&kem_ct_r),
-        )
-        .unwrap();
+        let (.., mut message_3, _cred_i, responder) = pq_sig_kemsig_to_message_3();
 
         #[allow(deprecated)]
         {
@@ -1837,7 +1828,7 @@ mod test {
     #[cfg(feature = "test-ead-none")]
     #[test]
     fn test_pq_message_3_rejects_a_wrong_sized_prefix() {
-        let (.., responder) = pq_up_to_message_3();
+        let (.., responder) = pq_sig_kemsig_to_message_3();
 
         let mut message_3 = BufferMessage3::new();
         message_3.extend_from_slice(&[0x58, 0x20]).unwrap();

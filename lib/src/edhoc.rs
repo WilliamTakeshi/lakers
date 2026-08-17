@@ -461,10 +461,10 @@ pub fn r_verify_message_3(
             let salt_4e3m = compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3);
             r_verify_message_3_psk(state, crypto, valid_cred_i, id_cred_psk, cred_r, &salt_4e3m)
         }?,
-        // Verifying SIGNATURE_3 and computing TH_4 is the initiator-authentication half of
-        // §3.2; wired up next.
         #[cfg(feature = "pq")]
-        ProcessingM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
+        ProcessingM3MethodSpecifics::Pq { .. } => {
+            pq::r_verify_message_3_pq(state, crypto, valid_cred_i)?
+        }
     };
 
     let mut prk_out: BytesHashLen = Default::default();
@@ -711,9 +711,10 @@ pub fn i_prepare_message_3(
         ProcessedM2MethodSpecifics::Psk { .. } => {
             i_prepare_message_3_psk(state, crypto, cred_i, cred_transfer, ead_3)?
         }
-        // Needs the kem.ct_R prefix and an ML-DSA SIGNATURE_3; wired up next.
         #[cfg(feature = "pq")]
-        ProcessedM2MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
+        ProcessedM2MethodSpecifics::Pq { .. } => {
+            pq::i_prepare_message_3_pq(state, crypto, cred_i, cred_transfer, ead_3)?
+        }
     };
 
     let mut prk_out: BytesHashLen = Default::default();
@@ -1238,10 +1239,7 @@ fn encrypt_message_3<TagLen: CcmTagLen>(
 ///
 /// `draft-spm-lake-pqsuites` mandates AES-CCM-16-128-128, so this is also where the 16-byte
 /// tag is bound to the post-quantum suite.
-// The Initiator does not reach this yet: `i_prepare_message_3_pq` needs SIGNATURE_3, which is
-// the next commit. Exercised meanwhile by the message_3 tests.
 #[cfg(feature = "pq")]
-#[allow(dead_code)]
 pub(crate) fn encrypt_message_3_pq(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,

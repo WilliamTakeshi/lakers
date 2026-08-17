@@ -21,23 +21,26 @@
 //! and `PRK_3e2m` otherwise. See `pq_edhoc_section3.md` §4.
 
 use super::{
-    compute_mac_2, compute_salt_3e2m, compute_th_3, decrypt_message_3_pq, encode_plaintext_2,
-    encode_sig_structure, strip_kem_ct_r, BufferMessage3, BytesHashLen, BytesMacSig, ConnId,
+    compute_mac_2, compute_mac_3, compute_salt_3e2m, compute_th_3, compute_th_4,
+    decrypt_message_3_pq, encode_plaintext_2, encode_plaintext_3, encode_sig_structure,
+    encrypt_message_3_pq, strip_kem_ct_r, BufferMessage3, BytesHashLen, BytesMacSig, ConnId,
     Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
-    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PreparedMessage2, ProcessingM2,
-    ProcessingM2MethodSpecifics, ProcessingM3MethodSpecifics, VerifiedPeerMessage2, WaitM3,
-    WaitM3MethodSpecifics,
+    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PreparedMessage2,
+    PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessingM2,
+    ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, Th4Input,
+    VerifiedMessage3, VerifiedPeerMessage2, WaitM3, WaitM3MethodSpecifics,
 };
 use lakers_shared::{
     decode_plaintext_2_pqsig, decode_plaintext_3_pqsig, BytesKemDecapsKey, BytesKemEncapsKey,
     BytesPqSignKey, BytesPqVerifyKey, PqAuthMode,
 };
 
-/// The Responder's public key material, split out of a credential according to its mode.
+/// A peer's public key material, split out of its credential according to its mode.
 ///
-/// A mode/credential disagreement is caught here rather than deeper in: a Responder that is
+/// A mode/credential disagreement is caught here rather than deeper in: a peer that is
 /// supposed to sign but whose credential carries no ML-DSA key cannot authenticate at all.
-fn responder_keys(
+/// Both roles use this -- nothing about it is role-specific.
+fn credential_keys(
     cred: &Credential,
     mode: PqAuthMode,
 ) -> Result<(Option<BytesKemEncapsKey>, Option<BytesPqVerifyKey>), EDHOCError> {
@@ -74,7 +77,7 @@ pub(crate) fn r_prepare_message_2_pq(
     i_mode: PqAuthMode,
     r_mode: PqAuthMode,
 ) -> Result<PreparedMessage2, EDHOCError> {
-    let (_kem_pk, _dsa_pk) = responder_keys(&cred_r, r_mode)?;
+    let (_kem_pk, _dsa_pk) = credential_keys(&cred_r, r_mode)?;
 
     let id_cred_r = match cred_transfer {
         CredentialTransfer::ByValue => cred_r.by_value()?,
@@ -246,7 +249,7 @@ pub(crate) fn i_verify_message_2_pq(
         _ => return Err(EDHOCError::UnsupportedMethod),
     };
 
-    let (kem_pk, dsa_pk) = responder_keys(&valid_cred_r, r_mode)?;
+    let (kem_pk, dsa_pk) = credential_keys(&valid_cred_r, r_mode)?;
 
     if r_mode.signs() {
         let dsa_pk = dsa_pk.ok_or(EDHOCError::UnsupportedMethod)?;
@@ -301,4 +304,149 @@ pub(crate) fn i_verify_message_2_pq(
         th_3,
         kem_ct_r,
     })
+}
+
+/// Sign `MAC_3` with ML-DSA and send it, with `kem.ct_R` in front when the Responder
+/// authenticates by KEM.
+///
+/// The MAC is keyed by `state.prk_4e3m`, which the caller has already resolved per the
+/// normalization rule: `PRK_3e2m` when the Initiator only signs (§3.2, where the ladder passes
+/// through exactly as in RFC 9528's signature methods), and — once §3.3–3.5 land — `PRK_3e2m`
+/// again when it also uses a KEM, because `ss_I` is still a message away.
+pub(crate) fn i_prepare_message_3_pq(
+    state: &ProcessedM2,
+    crypto: &mut impl CryptoTrait,
+    cred_i: Credential,
+    cred_transfer: CredentialTransfer,
+    ead_3: &EadItems,
+) -> Result<PreparedMessage3, EDHOCError> {
+    let ProcessedM2MethodSpecifics::Pq {
+        i_mode,
+        kem_ct_r,
+        dsa_sk,
+    } = &state.method_specifics
+    else {
+        // FIXME: not an error so much as a lack of agreement between peers.
+        return Err(EDHOCError::UnsupportedMethod);
+    };
+
+    // An Initiator that also authenticates by KEM cannot finish its ladder here; `PRK_4e3m`
+    // waits on message_4's kem.ct_I. Rejected until the deferred-PRK_out work lands.
+    if i_mode.uses_kem() {
+        return Err(EDHOCError::UnsupportedMethod);
+    }
+    let dsa_sk = dsa_sk.as_ref().ok_or(EDHOCError::MissingIdentity)?;
+
+    let id_cred_i = match cred_transfer {
+        CredentialTransfer::ByValue => cred_i.by_value()?,
+        CredentialTransfer::ByReference => cred_i.by_kid()?,
+    };
+
+    let mac_3: BytesMacSig = compute_mac_3(
+        crypto,
+        &state.prk_4e3m,
+        &state.th_3,
+        id_cred_i.as_full_value(),
+        cred_i.bytes.as_slice(),
+        ead_3,
+    );
+
+    let sig_structure = encode_sig_structure(
+        id_cred_i.as_full_value(),
+        &state.th_3,
+        cred_i.bytes.as_slice(),
+        ead_3,
+        &mac_3,
+    )?;
+
+    let signature_3 = crypto.mldsa_sign(dsa_sk, sig_structure.as_slice())?;
+
+    let plaintext_3 = encode_plaintext_3(
+        Some((id_cred_i.as_encoded_value(), &signature_3.into())),
+        ead_3,
+    )?;
+
+    let message_3 = encrypt_message_3_pq(
+        crypto,
+        &state.prk_3e2m,
+        &state.th_3,
+        &plaintext_3,
+        kem_ct_r.as_ref(),
+    )?;
+
+    let th_4 = compute_th_4(
+        crypto,
+        &state.th_3,
+        cred_i.bytes.as_slice(),
+        Th4Input::Stat {
+            plaintext_3: &plaintext_3,
+        },
+    );
+
+    Ok(PreparedMessage3 { message_3, th_4 })
+}
+
+/// Verify `SIGNATURE_3` and close the transcript.
+///
+/// `TH_4` is `H(TH_3, PLAINTEXT_3, CRED_I)`, reused verbatim from the classical signature
+/// path: `CRED_I` rather than `ID_CRED_I`, which is divergence D4 in `pq_edhoc_section3.md`.
+pub(crate) fn r_verify_message_3_pq(
+    state: &ProcessingM3,
+    crypto: &mut impl CryptoTrait,
+    valid_cred_i: Credential,
+) -> Result<VerifiedMessage3, EDHOCError> {
+    let ProcessingM3MethodSpecifics::Pq {
+        i_mode,
+        signature_3,
+        id_cred_i,
+    } = &state.method_specifics
+    else {
+        // FIXME: not an error so much as a lack of agreement between peers.
+        return Err(EDHOCError::UnsupportedMethod);
+    };
+
+    // Mirrors the Initiator's refusal above: with a KEM in play `PRK_4e3m` is not derivable
+    // until message_4 has delivered kem.ct_I.
+    if i_mode.uses_kem() {
+        return Err(EDHOCError::UnsupportedMethod);
+    }
+    let prk_4e3m = state.prk_3e2m;
+
+    let (_kem_pk, dsa_pk) = credential_keys(&valid_cred_i, *i_mode)?;
+    let dsa_pk = dsa_pk.ok_or(EDHOCError::UnsupportedMethod)?;
+
+    let mac_3: BytesMacSig = compute_mac_3(
+        crypto,
+        &prk_4e3m,
+        &state.th_3,
+        id_cred_i.as_full_value(),
+        valid_cred_i.bytes.as_slice(),
+        &state.ead_3,
+    );
+
+    let sig_structure = encode_sig_structure(
+        id_cred_i.as_full_value(),
+        &state.th_3,
+        valid_cred_i.bytes.as_slice(),
+        &state.ead_3,
+        &mac_3,
+    )?;
+
+    if !crypto
+        .mldsa_verify(&dsa_pk, sig_structure.as_slice(), signature_3)
+        .unwrap_or(false)
+    {
+        return Err(EDHOCError::MacVerificationFailed);
+    }
+
+    let th_4 = compute_th_4(
+        crypto,
+        &state.th_3,
+        valid_cred_i.bytes.as_slice(),
+        Th4Input::Stat {
+            plaintext_3: &state.plaintext_3,
+        },
+    );
+
+    Ok(VerifiedMessage3 { prk_4e3m, th_4 })
 }
