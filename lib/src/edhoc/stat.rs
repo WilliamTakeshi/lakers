@@ -2,7 +2,7 @@ use super::{
     compute_mac_2, compute_mac_3, compute_prk_3e2m, compute_prk_4e3m, compute_salt_3e2m,
     compute_th_3, compute_th_4, decode_plaintext_2, decode_plaintext_3, decrypt_message_3,
     encode_plaintext_2, encode_plaintext_3, encrypt_message_3, BufferMessage3, BufferPlaintext2,
-    BytesHashLen, BytesMac3, BytesP256ElemLen, ConnId, Credential, CredentialKey,
+    BytesHashLen, BytesMac3, BytesP256ElemLen, CcmTagLen8, ConnId, Credential, CredentialKey,
     CredentialTransfer, DecodedMessage2, EDHOCError, EDHOCMethod, EadItems, IdCred,
     ParsedMessage2Details, ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2,
     ProcessingM1, ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3,
@@ -71,7 +71,8 @@ pub(crate) fn r_parse_message_3_stat(
     crypto: &mut impl CryptoTrait,
     message_3: &BufferMessage3,
 ) -> Result<ParsedMessage3, EDHOCError> {
-    let plaintext_3 = decrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, message_3, None);
+    let plaintext_3 =
+        decrypt_message_3::<CcmTagLen8>(crypto, &state.prk_3e2m, &state.th_3, message_3, None);
 
     if let Ok(plaintext_3) = plaintext_3 {
         let decoded_p3_res = decode_plaintext_3(&plaintext_3);
@@ -225,7 +226,8 @@ pub(crate) fn i_prepare_message_3_stat(
 
     let plaintext_3 =
         encode_plaintext_3(Some((id_cred_i.as_encoded_value(), &mac_3.into())), &ead_3)?;
-    let message_3 = encrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3, None)?;
+    let message_3 =
+        encrypt_message_3::<CcmTagLen8>(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3, None)?;
 
     let th_4 = compute_th_4(
         crypto,

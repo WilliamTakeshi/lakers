@@ -7,9 +7,9 @@ use crate::edhoc::encode_sig_structure;
 use super::{
     compute_mac_2, compute_mac_3, compute_th_3, compute_th_4, decrypt_message_3,
     encode_plaintext_2, encode_plaintext_3, encrypt_message_3, BufferMessage3, BufferPlaintext2,
-    BytesHashLen, BytesP256ElemLen, ConnId, Credential, CredentialKey, CredentialTransfer,
-    Crypto as CryptoTrait, DecodedMessage2, EDHOCError, EDHOCMethod, EadItems, IdCred,
-    ParsedMessage2Details, ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2,
+    BytesHashLen, BytesP256ElemLen, CcmTagLen8, ConnId, Credential, CredentialKey,
+    CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2, EDHOCError, EDHOCMethod, EadItems,
+    IdCred, ParsedMessage2Details, ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2,
     ProcessedM2MethodSpecifics, ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3,
     ProcessingM3MethodSpecifics, Th4Input, VerifiedMessage3, VerifiedPeerMessage2, WaitM3,
     WaitM3MethodSpecifics,
@@ -85,7 +85,8 @@ pub(crate) fn r_parse_message_3_sig(
     crypto: &mut impl CryptoTrait,
     message_3: &BufferMessage3,
 ) -> Result<ParsedMessage3, EDHOCError> {
-    let plaintext_3 = decrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, message_3, None)?;
+    let plaintext_3 =
+        decrypt_message_3::<CcmTagLen8>(crypto, &state.prk_3e2m, &state.th_3, message_3, None)?;
 
     let (id_cred_i, signature_3, ead_3) = decode_plaintext_3_sig(&plaintext_3)?;
     Ok(ParsedMessage3 {
@@ -263,7 +264,8 @@ pub(crate) fn i_prepare_message_3_sig(
         Some((id_cred_i.as_encoded_value(), &signature_3.into())),
         ead_3,
     )?;
-    let message_3 = encrypt_message_3(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3, None)?;
+    let message_3 =
+        encrypt_message_3::<CcmTagLen8>(crypto, &state.prk_3e2m, &state.th_3, &plaintext_3, None)?;
 
     let th_4 = compute_th_4(
         crypto,

@@ -354,7 +354,8 @@ pub fn r_prepare_message_4(
 ) -> Result<(Completed, BufferMessage4), EDHOCError> {
     // compute ciphertext_4
     let plaintext_4 = encode_plaintext_4(&ead_4)?;
-    let message_4 = encrypt_message_4(crypto, &state.prk_4e3m, &state.th_4, &plaintext_4)?;
+    let message_4 =
+        encrypt_message_4::<CcmTagLen8>(crypto, &state.prk_4e3m, &state.th_4, &plaintext_4)?;
 
     Ok((
         Completed {
@@ -525,7 +526,8 @@ pub fn i_process_message_4(
     crypto: &mut impl CryptoTrait,
     message_4: &BufferMessage4,
 ) -> Result<(Completed, EadItems), EDHOCError> {
-    let plaintext_4 = decrypt_message_4(crypto, &state.prk_4e3m, &state.th_4, &message_4)?;
+    let plaintext_4 =
+        decrypt_message_4::<CcmTagLen8>(crypto, &state.prk_4e3m, &state.th_4, &message_4)?;
     let decoded_p4_res = decode_plaintext_4(&plaintext_4);
 
     if let Ok(ead_4) = decoded_p4_res {
@@ -949,7 +951,7 @@ fn compute_k_4_iv_4(
 }
 
 // calculates ciphertext_3 wrapped in a cbor byte string
-fn encrypt_message_3(
+fn encrypt_message_3<TagLen: CcmTagLen>(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,
     th_3: &BytesHashLen,
@@ -957,7 +959,7 @@ fn encrypt_message_3(
     psk_fields: Option<(&[u8], &[u8], &[u8])>,
 ) -> Result<BufferMessage3, EDHOCError> {
     let mut output: BufferMessage3 = BufferMessage3::new();
-    let bytestring_length = plaintext_3.len() + AES_CCM_TAG_LEN;
+    let bytestring_length = plaintext_3.len() + TagLen::LEN;
 
     encode_bstr_header(&mut output, bytestring_length)?;
 
@@ -969,13 +971,12 @@ fn encrypt_message_3(
     let enc_structure = encode_enc_structure(external_aad.as_slice())?;
     let (k_3, iv_3) = compute_k_3_iv_3(crypto, prk_3e2m, th_3);
 
-    let ciphertext_3: BufferCiphertext3 = crypto
-        .aes_ccm_encrypt::<MAX_MESSAGE_SIZE_LEN, CcmTagLen8>(
-            &k_3,
-            &iv_3,
-            &enc_structure.as_slice()[..enc_structure.len()],
-            plaintext_3.as_slice(),
-        );
+    let ciphertext_3: BufferCiphertext3 = crypto.aes_ccm_encrypt::<MAX_MESSAGE_SIZE_LEN, TagLen>(
+        &k_3,
+        &iv_3,
+        &enc_structure.as_slice()[..enc_structure.len()],
+        plaintext_3.as_slice(),
+    );
 
     output
         .extend_from_slice(ciphertext_3.as_slice())
@@ -984,7 +985,7 @@ fn encrypt_message_3(
     Ok(output)
 }
 
-fn decrypt_message_3(
+fn decrypt_message_3<TagLen: CcmTagLen>(
     crypto: &mut impl CryptoTrait,
     prk_3e2m: &BytesHashLen,
     th_3: &BytesHashLen,
@@ -993,7 +994,7 @@ fn decrypt_message_3(
 ) -> Result<BufferPlaintext3, EDHOCError> {
     let (bytestring_length, prefix_length) = decode_bstr_header(message_3.as_slice())?;
 
-    if bytestring_length < AES_CCM_TAG_LEN {
+    if bytestring_length < TagLen::LEN {
         return Err(EDHOCError::ParsingError);
     }
 
@@ -1006,7 +1007,7 @@ fn decrypt_message_3(
     let external_aad = build_external_aad(th_3, psk_fields)?;
     let enc_structure = encode_enc_structure(external_aad.as_slice())?;
 
-    crypto.aes_ccm_decrypt::<MAX_MESSAGE_SIZE_LEN, CcmTagLen8>(
+    crypto.aes_ccm_decrypt::<MAX_MESSAGE_SIZE_LEN, TagLen>(
         &k_3,
         &iv_3,
         &enc_structure.as_slice()[..enc_structure.len()],
@@ -1014,14 +1015,14 @@ fn decrypt_message_3(
     )
 }
 
-fn encrypt_message_4(
+fn encrypt_message_4<TagLen: CcmTagLen>(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
     th_4: &BytesHashLen,
     plaintext_4: &BufferPlaintext4,
 ) -> Result<BufferMessage4, EDHOCError> {
     let mut output: BufferMessage4 = BufferMessage4::new();
-    let bytestring_length = plaintext_4.len() + AES_CCM_TAG_LEN;
+    let bytestring_length = plaintext_4.len() + TagLen::LEN;
 
     encode_bstr_header(&mut output, bytestring_length)?;
 
@@ -1033,13 +1034,12 @@ fn encrypt_message_4(
 
     let (k_4, iv_4) = compute_k_4_iv_4(crypto, prk_4e3m, th_4);
 
-    let ciphertext_4: BufferCiphertext4 = crypto
-        .aes_ccm_encrypt::<MAX_MESSAGE_SIZE_LEN, CcmTagLen8>(
-            &k_4,
-            &iv_4,
-            &enc_structure.as_slice()[..enc_structure.len()],
-            plaintext_4.as_slice(),
-        );
+    let ciphertext_4: BufferCiphertext4 = crypto.aes_ccm_encrypt::<MAX_MESSAGE_SIZE_LEN, TagLen>(
+        &k_4,
+        &iv_4,
+        &enc_structure.as_slice()[..enc_structure.len()],
+        plaintext_4.as_slice(),
+    );
 
     output
         .extend_from_slice(ciphertext_4.as_slice())
@@ -1048,7 +1048,7 @@ fn encrypt_message_4(
     Ok(output)
 }
 
-fn decrypt_message_4(
+fn decrypt_message_4<TagLen: CcmTagLen>(
     crypto: &mut impl CryptoTrait,
     prk_4e3m: &BytesHashLen,
     th_4: &BytesHashLen,
@@ -1056,7 +1056,7 @@ fn decrypt_message_4(
 ) -> Result<BufferPlaintext4, EDHOCError> {
     let (bytestring_length, prefix_length) = decode_bstr_header(message_4.as_slice())?;
 
-    if bytestring_length < AES_CCM_TAG_LEN {
+    if bytestring_length < TagLen::LEN {
         return Err(EDHOCError::ParsingError);
     }
 
@@ -1069,7 +1069,7 @@ fn decrypt_message_4(
 
     let enc_structure = encode_enc_structure(th_4)?;
 
-    crypto.aes_ccm_decrypt::<MAX_MESSAGE_SIZE_LEN, CcmTagLen8>(
+    crypto.aes_ccm_decrypt::<MAX_MESSAGE_SIZE_LEN, TagLen>(
         &k_4,
         &iv_4,
         &enc_structure.as_slice()[..enc_structure.len()],
@@ -1841,7 +1841,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_message_3() {
-        let message_3 = encrypt_message_3(
+        let message_3 = encrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -1853,7 +1853,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_message_3b_psk() {
-        let ciphertext_3b = encrypt_message_3(
+        let ciphertext_3b = encrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_4E3M_PSK_TV,
             &TH_3_PSK_TV,
@@ -1887,7 +1887,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_message_3() {
-        let plaintext_3 = decrypt_message_3(
+        let plaintext_3 = decrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -1913,7 +1913,7 @@ mod tests {
 
         for case in cases {
             let message_3 = BufferMessage3::new_from_slice(case).unwrap();
-            let res = decrypt_message_3(
+            let res = decrypt_message_3::<CcmTagLen8>(
                 &mut default_crypto(),
                 &PRK_3E2M_TV,
                 &TH_3_TV,
@@ -1939,7 +1939,7 @@ mod tests {
         }
 
         let plaintext_3 = BufferPlaintext3::new_from_slice(&[0x5a; PLAINTEXT_LEN]).unwrap();
-        let message_3 = encrypt_message_3(
+        let message_3 = encrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -1955,7 +1955,7 @@ mod tests {
             &[0x59, (payload_len >> 8) as u8, payload_len as u8]
         );
 
-        let roundtrip = decrypt_message_3(
+        let roundtrip = decrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -1984,7 +1984,7 @@ mod tests {
             plaintext_3.push((i % 251) as u8).unwrap();
         }
 
-        let message_3 = encrypt_message_3(
+        let message_3 = encrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -1994,7 +1994,7 @@ mod tests {
         .unwrap();
         assert_eq!(message_3.len(), PQ_MESSAGE_3_LEN);
 
-        let roundtrip = decrypt_message_3(
+        let roundtrip = decrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_3E2M_TV,
             &TH_3_TV,
@@ -2005,9 +2005,63 @@ mod tests {
         assert_eq!(roundtrip, plaintext_3);
     }
 
+    /// draft-spm-lake-pqsuites selects AES-CCM-16-128-128, a 16-byte tag, where suite 2 uses
+    /// AES-CCM-16-64-128. Both widths must round-trip, and the tag length must show up in the
+    /// message size and in the CBOR length header.
+    #[test]
+    fn test_encrypt_decrypt_message_3_tag_lengths() {
+        let message_3_tag8 = encrypt_message_3::<CcmTagLen8>(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &PLAINTEXT_3_TV,
+            None,
+        )
+        .unwrap();
+        let message_3_tag16 = encrypt_message_3::<CcmTagLen16>(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &PLAINTEXT_3_TV,
+            None,
+        )
+        .unwrap();
+
+        // Compare the bstr payloads, not the whole messages: for this plaintext the extra tag
+        // bytes push the payload past 23, so the CBOR length header also grows from one byte to
+        // two and the total difference is 9 rather than 8.
+        let (payload_8, header_8) = decode_bstr_header(message_3_tag8.as_slice()).unwrap();
+        let (payload_16, header_16) = decode_bstr_header(message_3_tag16.as_slice()).unwrap();
+        assert_eq!(payload_8, PLAINTEXT_3_TV.len() + CcmTagLen8::LEN);
+        assert_eq!(payload_16, PLAINTEXT_3_TV.len() + CcmTagLen16::LEN);
+        assert_eq!((header_8, header_16), (1, 2));
+
+        assert_eq!(
+            decrypt_message_3::<CcmTagLen16>(
+                &mut default_crypto(),
+                &PRK_3E2M_TV,
+                &TH_3_TV,
+                &message_3_tag16,
+                None,
+            )
+            .unwrap(),
+            PLAINTEXT_3_TV
+        );
+
+        // Decrypting with the wrong tag length must fail rather than silently truncate.
+        assert!(decrypt_message_3::<CcmTagLen8>(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &message_3_tag16,
+            None,
+        )
+        .is_err());
+    }
+
     #[test]
     fn test_decrypt_message_3b_psk() {
-        let plaintext_3b = decrypt_message_3(
+        let plaintext_3b = decrypt_message_3::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_4E3M_PSK_TV,
             &TH_3_PSK_TV,
@@ -2140,7 +2194,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_message_4() {
-        let message_4 = encrypt_message_4(
+        let message_4 = encrypt_message_4::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_4E3M_TV,
             &TH_4_TV,
@@ -2151,7 +2205,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_message_4_psk() {
-        let message_4 = encrypt_message_4(
+        let message_4 = encrypt_message_4::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_4E3M_PSK_TV,
             &TH_4_PSK_TV,
@@ -2162,15 +2216,19 @@ mod tests {
 
     #[test]
     fn test_decrypt_message_4() {
-        let plaintext_4 =
-            decrypt_message_4(&mut default_crypto(), &PRK_4E3M_TV, &TH_4_TV, &MESSAGE_4_TV);
+        let plaintext_4 = decrypt_message_4::<CcmTagLen8>(
+            &mut default_crypto(),
+            &PRK_4E3M_TV,
+            &TH_4_TV,
+            &MESSAGE_4_TV,
+        );
         assert!(plaintext_4.is_ok());
         assert_eq!(plaintext_4.unwrap(), PLAINTEXT_4_TV);
     }
 
     #[test]
     fn test_decrypt_message_4_psk() {
-        let plaintext_4 = decrypt_message_4(
+        let plaintext_4 = decrypt_message_4::<CcmTagLen8>(
             &mut default_crypto(),
             &PRK_4E3M_PSK_TV,
             &TH_4_PSK_TV,
@@ -2736,16 +2794,28 @@ mod rfc9529_method0 {
     #[test]
     fn message_3_matches() {
         let plaintext_3 = BufferPlaintext3::new_from_slice(PLAINTEXT_3).unwrap();
-        let message_3 =
-            encrypt_message_3(&mut default_crypto(), &PRK_3E2M, &TH_3, &plaintext_3, None).unwrap();
+        let message_3 = encrypt_message_3::<CcmTagLen8>(
+            &mut default_crypto(),
+            &PRK_3E2M,
+            &TH_3,
+            &plaintext_3,
+            None,
+        )
+        .unwrap();
         assert_eq!(message_3.as_slice(), MESSAGE_3);
     }
 
     #[test]
     fn message_3_decrypts() {
         let message_3 = BufferMessage3::new_from_slice(MESSAGE_3).unwrap();
-        let plaintext_3 =
-            decrypt_message_3(&mut default_crypto(), &PRK_3E2M, &TH_3, &message_3, None).unwrap();
+        let plaintext_3 = decrypt_message_3::<CcmTagLen8>(
+            &mut default_crypto(),
+            &PRK_3E2M,
+            &TH_3,
+            &message_3,
+            None,
+        )
+        .unwrap();
         assert_eq!(plaintext_3.as_slice(), PLAINTEXT_3);
     }
 

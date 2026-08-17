@@ -3,8 +3,8 @@ use super::{
     compute_prk_4e3m_psk, compute_salt_4e3m, compute_th_3, compute_th_4, decode_plaintext_2_psk,
     decode_plaintext_3_psk, decrypt_message_3, encode_ciphertext_3a, encode_plaintext_2,
     encode_plaintext_3, encrypt_decrypt_ciphertext_3a, encrypt_message_3, parse_message_3,
-    BufferCiphertext3, BufferMessage3, BufferPlaintext2, BytesHashLen, ConnId, Credential,
-    CredentialKey, CredentialTransfer, DecodedMessage2, EDHOCError, EadItems, IdCred,
+    BufferCiphertext3, BufferMessage3, BufferPlaintext2, BytesHashLen, CcmTagLen8, ConnId,
+    Credential, CredentialKey, CredentialTransfer, DecodedMessage2, EDHOCError, EadItems, IdCred,
     ParsedMessage2Details, ParsedMessage3, PreparedMessage2, PreparedMessage3, ProcessedM2,
     ProcessedM2MethodSpecifics, ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3,
     ProcessingM3MethodSpecifics, Th4Input, VerifiedMessage2, VerifiedMessage3, WaitM3,
@@ -89,7 +89,7 @@ where
         _ => return Err(EDHOCError::UnsupportedMethod),
     };
 
-    let plaintext_3b = decrypt_message_3(
+    let plaintext_3b = decrypt_message_3::<CcmTagLen8>(
         crypto,
         &prk_4e3m,
         &state.th_3,
@@ -207,7 +207,7 @@ pub(crate) fn i_prepare_message_3_psk(
     let mut message_3: BufferMessage3 = BufferMessage3::new();
 
     let plaintext_3 = encode_plaintext_3(None, &ead_3)?;
-    let ciphertext_3b = encrypt_message_3(
+    let ciphertext_3b = encrypt_message_3::<CcmTagLen8>(
         crypto,
         &state.prk_4e3m,
         &state.th_3,
