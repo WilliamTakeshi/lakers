@@ -582,6 +582,33 @@ verifiable trace, listing which values an implementation can compare directly (`
 `H(message_1)`, `TH_2`, `PRK_2e`) and which it can only check by verifying signatures and
 recomputing the schedule.
 
+### D16 — every variant exceeds 6LoWPAN's fragmentation limit · **B**
+
+RFC 4944's fragment header carries `datagram_size` in an **11-bit** field, so the largest
+datagram 6LoWPAN can reassemble is **2047 octets**. Measured from the working implementation
+(§8), every one of the four variants produces at least one message above that:
+
+| §   | Messages over 2047 bytes                |
+| --- | --------------------------------------- |
+| 3.2 | `message_2` (3196), `message_3` (3214)  |
+| 3.3 | `message_2` (3196), `message_3` (2443)  |
+| 3.4 | `message_3` (3214)                      |
+| 3.5 | `message_2` (3196), `message_3` (3214)  |
+
+This is not a tuning problem. An ML-DSA-44 signature is 2420 bytes on its own, so any message
+carrying one is over the limit before anything else is added, and no parameter choice inside
+ML-DSA-44 changes that. The draft's target deployments are exactly the constrained networks
+where 6LoWPAN is used, and RFC 9528 §A.2 already specifies EDHOC over CoAP, so the resolution
+is available — but it has to be *stated*, because "use 6LoWPAN fragmentation" is the obvious
+thing an implementer would reach for and it does not work.
+
+**Proposed:** an Applicability/Transport section noting that §3's messages exceed RFC 4944's
+2047-octet reassembly limit, and that a transport with its own segmentation — CoAP block-wise
+transfer (RFC 7959) as in RFC 9528 §A.2 — is therefore required rather than optional. Worth
+pairing with the fragment counts in §8: at a typical 76-byte usable payload, §3.5 costs 108
+link-layer fragments against SigSig's 5, and 6LoWPAN reassembly is all-or-nothing, so the
+probability of completing a handshake degrades sharply with frame loss.
+
 ---
 
 ## 6. What the lakers prototype implements
@@ -607,7 +634,115 @@ resolution proposed above.
 
 ---
 
-## 7. Open questions for the authors
+## 7. Measurements
+
+All figures below are **measured from the working implementation**, not estimated:
+`test_pq_wire_sizes`, `test_pq_handshake_kemsig_sig`, `test_pq_handshake_kemsig_kem` and
+`test_pq_handshake_kemsig_kemsig` in `lib/src/lib.rs` assert them, so they cannot drift
+silently. Configuration: ML-KEM-512 (ephemeral and static), ML-DSA-44, SHA-256,
+AES-CCM-16-128-128, credentials **by reference**, no EAD in any message. The classical
+baselines come from `test_mixed_methods_are_per_role` in the same file, at cipher suite 2.
+
+### 7.1 Bytes on the wire
+
+| Method            | message_1 | message_2 | message_3 | message_4 | total | vs. method 0 |
+| ----------------- | --------: | --------: | --------: | --------: | ----: | -----------: |
+| 0 SigSig          |        37 |       102 |        77 |         9 |   225 |         1.0x |
+| 3 StatStat        |        37 |        45 |        19 |         9 |   110 |         0.5x |
+| 40 §3.2           |       808 |      3196 |      3214 |         9 |  7227 |        32.1x |
+| 41 §3.3           |       808 |      3196 |      2443 |       788 |  7235 |        32.2x |
+| 42 §3.4           |       808 |       773 |      3214 |       798 |  5593 |        24.9x |
+| 43 §3.5           |       808 |      3196 |      3214 |       788 |  8006 |        35.6x |
+
+Reading the table:
+
+- **message_1 is the same in all four** and is entirely the 800-byte `kem.pk_eph`: METHOD(2) +
+  SUITES_I(2) + bstr header(3) + 800 + C_I(1).
+- **message_2 follows the Responder's mode.** 3196 bytes whenever R signs — bstr header(3) +
+  `kem.ct_eph`(768) + a CIPHERTEXT_2 dominated by the 2420-byte `SIGNATURE_2`. §3.4's R does
+  not sign, and its message_2 collapses to 773: the same 771 bytes of framing and ephemeral
+  ciphertext plus two bytes of `C_R` and `ID_CRED_R`. It is the only message in all of §3 that
+  stays under a kilobyte.
+- **message_3 follows the Responder's mode too**, because that is what decides whether
+  `kem.ct_R` is present: 3214 with the prefix, 2443 without. The 771-byte difference is
+  `kem.ct_R` and its bstr header exactly.
+- **message_4 follows the Initiator's mode.** 9 bytes when it only signs (§3.2, unchanged from
+  RFC 9528), 788 when `kem.ct_I` rides along, 798 for §3.4 where the deferred `MAC_2` adds ten
+  more — eight of MAC, one of bstr header, and one because CIPHERTEXT_4 crosses 23 bytes and
+  its own header widens.
+
+The cheapest variant is **§3.4 at 24.9x**, and it is cheapest precisely because its Responder
+never signs — which is also what makes it the one variant whose Responder is unauthenticated
+until the last message (D11). That trade is worth stating explicitly in the draft.
+
+### 7.2 Link-layer fragmentation
+
+Model: IEEE 802.15.4 with 81 bytes of L2 payload after MAC header and FCS (short addresses,
+link-layer security on), RFC 4944 6LoWPAN fragmentation with a 4-byte FRAG1 header and 5-byte
+FRAGN headers — so 77 bytes of EDHOC message in the first fragment and 76 in each subsequent
+one.
+
+| Method            | m1 | m2 | m3 | m4 | fragments per handshake |
+| ----------------- | -: | -: | -: | -: | ----------------------: |
+| 0 SigSig          |  1 |  2 |  1 |  1 |                       5 |
+| 3 StatStat        |  1 |  1 |  1 |  1 |                       4 |
+| 40 §3.2           | 11 | 43 | 43 |  1 |                      98 |
+| 41 §3.3           | 11 | 43 | 33 | 11 |                      98 |
+| 42 §3.4           | 11 | 11 | 43 | 11 |                      76 |
+| 43 §3.5           | 11 | 43 | 43 | 11 |                     108 |
+
+6LoWPAN reassembly is all-or-nothing: losing any one fragment discards the whole datagram. A
+handshake that takes 108 fragments instead of 5 does not merely cost 20x the airtime, it fails
+at a frame-loss rate 20x lower.
+
+**And it cannot be done at all over RFC 4944.** Its `datagram_size` field is 11 bits, capping
+reassembly at 2047 octets, and every variant has at least one message above that — see D16.
+The counts above are therefore what a transport with its own segmentation would cost, not what
+6LoWPAN can deliver.
+
+---
+
+## 8. What implementing the draft turned up in lakers
+
+Ten defects in code that predates this work, none of them post-quantum. They are listed
+because they are evidence for the WG that implementing §3 exercises paths a classical EDHOC
+implementation does not: five of the ten were found only because a post-quantum message is
+large, or because a second cipher suite and a method code point above 23 had to work.
+
+Every one was confirmed by restoring the old code and watching a new test fail, never by
+inspection alone.
+
+| # | Defect | Surfaced by |
+| - | ------ | ----------- |
+| 1 | `encode_message_2` computed the bstr length with `as u8`: panics in debug and **silently emits a corrupt message in release** for any CIPHERTEXT_2 over 255 bytes | PQ message_2 is 3196 bytes |
+| 2 | `encrypt_message_3`/`_4` wrote a one-byte length header via a *cast*, truncating silently in both profiles | same |
+| 3 | `decrypt_message_3`/`_4` indexed `message[0]`/`[1]` unchecked — **an empty message_3 panics, reachable from a peer** on the sig and stat paths (the existing empty-message test covered only PSK) | reviewing the same functions |
+| 4 | A valid but too-short bstr reached `aes_ccm_decrypt`, which computes `ciphertext.len() - Tag::LEN` unguarded and underflows | same |
+| 5 | `r_process_message_1` validated SUITES_I against the hardcoded `EDHOC_SUPPORTED_SUITES[0]`, ignoring `crypto.supported_suites()` — any backend offering a second suite had its own selection rejected | adding a PQ cipher suite |
+| 6 | `encode_message_1` emitted `SUITES_I == 24` as a bare `0x18`, which is CBOR's "one length byte follows"; the decoder then ate `G_X`'s bstr header as the suite. **Suites 24 and 25 are both assigned** | same |
+| 7 | `encode_message_1` emitted METHOD >= 24 as a raw byte: method 40 becomes `0x28`, which reads back as the **negative integer -9** | PQ method code points are 40-43 |
+| 8 | Backend crypto conformance tests never ran in CI at all — not the new ML-KEM/ML-DSA ones, nor the pre-existing ECDSA ones | adding trait methods |
+| 9 | `ProcessingM2C::copy_into_c` and `ProcessedM2C::copy_into_c` in the C bindings `todo!()`d on the signature arm — **a Rust panic unwinding across the FFI boundary**, reachable by a C caller that passes method 0 to `initiator_new` | converting the bindings' `todo!()`s |
+| 10 | `EdhocInitiatorWaitM4::completed_without_message_4` returned `EdhocResponderDone`. Both wrap the same `Completed`, so it compiled and no test noticed | the message_4 rework |
+
+Items 1, 2, 3 and 4 are wire-format handling; 3 is remotely triggerable. Items 5, 6 and 7 are
+all the same shape — a CBOR integer or a suite identifier that only ever gets exercised once a
+value above 23 exists, which classical EDHOC never produces.
+
+Two further observations for implementers, not defects:
+
+- **State size.** The typestate chain moves protocol states by value, and a `pq` build's
+  states are dominated by fixed-size buffers: `ProcessingM3` reached 37 kB before tuning, and
+  driving two handshakes in one stack frame overflowed the stack of a test thread. §3 is not
+  merely a bandwidth problem for constrained devices; it is a RAM problem, and an
+  implementation that sizes buffers by the largest message will not fit the targets the draft
+  is aimed at.
+- **Randomised signing.** ML-DSA's hedged signing makes byte-reproducible test vectors
+  impossible without mandating the deterministic variant — see D15.
+
+---
+
+## 9. Open questions for the authors
 
 1. **D1:** confirm `PRK_4e3m` is intended for §3.5's `PRK_out`.
 2. **D2:** was the `ID_CRED_x` binding in `TH_3`/`TH_4` deliberate? If so, what replaces the
@@ -623,3 +758,8 @@ resolution proposed above.
    should carry the KEM+signature combinations?
 7. **D15:** should a test-vector appendix mandate deterministic ML-DSA signing so it can be
    regenerated and diffed, or be specified as a verifiable-but-not-reproducible trace?
+8. **D16:** given that every variant exceeds RFC 4944's 2047-octet reassembly limit, should the
+   draft require a transport with its own segmentation, and say so in an Applicability section?
+9. **§7:** §3.4 is both the cheapest variant (24.9x rather than 35.6x) and the only one whose
+   Responder is unauthenticated until message_4. Is that trade deliberate, and should the draft
+   present it as the reason to choose §3.4?
