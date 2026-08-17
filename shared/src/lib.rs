@@ -1283,13 +1283,25 @@ mod edhoc_parser {
         ),
         EDHOCError,
     > {
+        parse_message_1_sized::<P256_ELEM_LEN>(rcvd_message_1)
+    }
+
+    /// `N` is the length of the initiator's ephemeral wire element, fixed by the cipher suite:
+    /// 32 for a P-256 `G_X`, 800 for an ML-KEM-512 `kem.pk_eph`.
+    ///
+    /// The responder does not know the method until it has parsed one, so unlike message_2 it
+    /// cannot be told the length in advance; `r_process_message_1` reads METHOD first and then
+    /// re-parses at the right width.
+    pub fn parse_message_1_sized<const N: usize>(
+        rcvd_message_1: &BufferMessage1,
+    ) -> Result<(u8, EdhocBuffer<MAX_SUITES_LEN>, [u8; N], ConnId, EadItems), EDHOCError> {
         trace!("Enter parse_message_1");
         let mut decoder = CBORDecoder::new(rcvd_message_1.as_slice());
         let method = decoder.u8()?;
 
         if let Ok((suites_i, mut decoder)) = parse_suites_i(decoder) {
-            let mut g_x: BytesP256ElemLen = [0x00; P256_ELEM_LEN];
-            g_x.copy_from_slice(decoder.bytes_sized(P256_ELEM_LEN)?);
+            let mut g_x: [u8; N] = [0x00; N];
+            g_x.copy_from_slice(decoder.bytes_sized(N)?);
 
             // consume c_i encoded as single-byte int (we still do not support bstr encoding)
             let c_i = ConnId::from_decoder(&mut decoder)?;
@@ -1315,21 +1327,32 @@ mod edhoc_parser {
     pub fn parse_message_2(
         rcvd_message_2: &BufferMessage2,
     ) -> Result<(BytesP256ElemLen, BufferCiphertext2), EDHOCError> {
+        parse_message_2_sized::<P256_ELEM_LEN>(rcvd_message_2)
+    }
+
+    /// message_2 is one bstr holding the ephemeral wire element concatenated with
+    /// CIPHERTEXT_2. `N` is the length of that leading element, which is fixed by the cipher
+    /// suite: 32 for a P-256 `G_Y`, 768 for an ML-KEM-512 `kem.ct_eph`.
+    ///
+    /// The split point cannot be inferred from the message, so the caller supplies it from the
+    /// method it is running.
+    pub fn parse_message_2_sized<const N: usize>(
+        rcvd_message_2: &BufferMessage2,
+    ) -> Result<([u8; N], BufferCiphertext2), EDHOCError> {
         trace!("Enter parse_message_2");
         // FIXME decode negative integers as well
         let mut ciphertext_2: BufferCiphertext2 = BufferCiphertext2::new();
 
         let mut decoder = CBORDecoder::new(rcvd_message_2.as_slice());
 
-        // message_2 consists of 1 bstr element; this element in turn contains the concatenation of g_y and ciphertext_2
         let decoded = decoder.bytes()?;
         if decoder.finished() {
-            if let Some(key) = decoded.get(0..P256_ELEM_LEN) {
-                let mut g_y: BytesP256ElemLen = [0x00; P256_ELEM_LEN];
-                g_y.copy_from_slice(key);
-                if let Some(c2) = decoded.get(P256_ELEM_LEN..) {
+            if let Some(key) = decoded.get(0..N) {
+                let mut ephemeral: [u8; N] = [0x00; N];
+                ephemeral.copy_from_slice(key);
+                if let Some(c2) = decoded.get(N..) {
                     if ciphertext_2.fill_with_slice(c2).is_ok() {
-                        Ok((g_y, ciphertext_2))
+                        Ok((ephemeral, ciphertext_2))
                     } else {
                         Err(EDHOCError::ParsingError)
                     }

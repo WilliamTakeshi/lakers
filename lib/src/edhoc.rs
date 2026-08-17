@@ -234,7 +234,7 @@ pub fn r_prepare_message_2(
 
     ct.fill_with_slice(ciphertext_2.as_slice()).unwrap(); // TODO(hax): same as just above.
 
-    let message_2 = encode_message_2(&state.g_y, &ct)?;
+    let message_2 = encode_message_2(&state.g_y[..], &ct)?;
 
     Ok((
         WaitM3 {
@@ -388,7 +388,7 @@ pub fn i_prepare_message_1(
     ead_1: &EadItems,
 ) -> Result<(WaitM2, BufferMessage1), EDHOCError> {
     // Encode message_1 as a sequence of CBOR encoded data items as specified in Section 5.2.1
-    let message_1 = encode_message_1(state.method, &state.suites_i, &state.g_x, c_i, &ead_1)?;
+    let message_1 = encode_message_1(state.method, &state.suites_i, &state.g_x[..], c_i, &ead_1)?;
 
     // hash message_1 here to avoid saving the whole message in the state
     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
@@ -562,10 +562,13 @@ pub fn i_complete_without_message_4(state: &WaitM4) -> Result<Completed, EDHOCEr
     })
 }
 
+/// `eph_pk` is the initiator's ephemeral wire element: a 32-byte `G_X` classically, an
+/// 800-byte ML-KEM-512 `kem.pk_eph` for the post-quantum methods. It is taken as a slice so
+/// the encoder does not need to know which.
 fn encode_message_1(
     method: EDHOCMethod,
     suites: &EdhocBuffer<MAX_SUITES_LEN>,
-    g_x: &BytesP256ElemLen,
+    eph_pk: &[u8],
     c_i: ConnId,
     ead_1: &EadItems,
 ) -> Result<BufferMessage1, EDHOCError> {
@@ -600,25 +603,30 @@ fn encode_message_1(
         }
     };
 
-    output.push(CBOR_BYTE_STRING).unwrap(); // CBOR byte string magic number
-    output.push(P256_ELEM_LEN as u8).unwrap(); // length of the byte string
-    output.extend_from_slice(&g_x[..]).unwrap();
-    output.extend_from_slice(c_i.as_cbor()).unwrap();
+    encode_bstr_header(&mut output, eph_pk.len())?;
+    output
+        .extend_from_slice(eph_pk)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(c_i.as_cbor())
+        .map_err(|_| EDHOCError::EncodingError)?;
 
     ead_1.encode(&mut output)?;
 
     Ok(output)
 }
 
+/// `eph` is the responder's ephemeral wire element: a 32-byte `G_Y` classically, a 768-byte
+/// ML-KEM-512 `kem.ct_eph` for the post-quantum methods.
 fn encode_message_2(
-    g_y: &BytesP256ElemLen,
+    eph: &[u8],
     ciphertext_2: &BufferCiphertext2,
 ) -> Result<BufferMessage2, EDHOCError> {
     let mut output: BufferMessage2 = BufferMessage2::new();
 
-    encode_bstr_header(&mut output, P256_ELEM_LEN + ciphertext_2.len())?;
+    encode_bstr_header(&mut output, eph.len() + ciphertext_2.len())?;
     output
-        .extend_from_slice(g_y)
+        .extend_from_slice(eph)
         .map_err(|_| EDHOCError::EncodingError)?;
     output
         .extend_from_slice(ciphertext_2.as_slice())
@@ -2019,6 +2027,55 @@ mod tests {
         )
         .unwrap();
         assert_eq!(roundtrip, plaintext_3);
+    }
+
+    /// The ephemeral wire element is a fixed 32 bytes classically but 800 (message_1) and 768
+    /// (message_2) for ML-KEM-512. Both encoders take a slice and size their own bstr header,
+    /// so the same code carries either; the split point on parse comes from the caller, since
+    /// it cannot be inferred from the message.
+    #[test]
+    fn test_ephemeral_element_is_length_agnostic() {
+        const PK_EPH_LEN: usize = 800;
+        const CT_EPH_LEN: usize = 768;
+
+        if MAX_MESSAGE_SIZE_LEN < PK_EPH_LEN + 64 {
+            return;
+        }
+
+        let pk_eph: [u8; PK_EPH_LEN] = core::array::from_fn(|i| (i % 251) as u8);
+        let message_1 = encode_message_1(
+            EDHOCMethod::StatStat,
+            &EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[2]).unwrap(),
+            &pk_eph[..],
+            C_I_TV,
+            &EadItems::new(),
+        )
+        .unwrap();
+
+        // METHOD, SUITES_I, then a two-byte-length bstr holding the 800-byte key.
+        assert_eq!(
+            &message_1.as_slice()[2..5],
+            &[0x59, (PK_EPH_LEN >> 8) as u8, PK_EPH_LEN as u8]
+        );
+        let (_m, _s, parsed_pk, _c_i, _ead) =
+            parse_message_1_sized::<PK_EPH_LEN>(&message_1).unwrap();
+        assert_eq!(parsed_pk, pk_eph);
+
+        // The 32-byte parser must reject it rather than truncate.
+        assert!(parse_message_1(&message_1).is_err());
+
+        let ct_eph: [u8; CT_EPH_LEN] = core::array::from_fn(|i| (i % 241) as u8);
+        let ciphertext_2 = BufferCiphertext2::new_from_slice(&[0xab; 40]).unwrap();
+        let message_2 = encode_message_2(&ct_eph[..], &ciphertext_2).unwrap();
+
+        let (parsed_ct, parsed_c2) = parse_message_2_sized::<CT_EPH_LEN>(&message_2).unwrap();
+        assert_eq!(parsed_ct, ct_eph);
+        assert_eq!(parsed_c2, ciphertext_2);
+
+        // Splitting at the wrong length must not silently succeed.
+        let (wrong_eph, wrong_c2) = parse_message_2_sized::<P256_ELEM_LEN>(&message_2).unwrap();
+        assert_ne!(wrong_c2, ciphertext_2);
+        assert_eq!(&wrong_eph[..], &ct_eph[..P256_ELEM_LEN]);
     }
 
     /// Suite 24 is assigned (A256GCM with P-384 and ES384) and encodes as `0x18 0x18`: 24 is
