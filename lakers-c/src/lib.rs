@@ -194,7 +194,14 @@ impl ProcessingM2C {
     }
 
     /// note that it is a shallow copy (ead_2 is handled separately by the caller)
-    pub unsafe fn copy_into_c(processing_m2: ProcessingM2, processing_m2_c: *mut ProcessingM2C) {
+    ///
+    /// Fallible because not every method has a C representation. It used to `todo!()`, which
+    /// panics across the FFI boundary -- reachable from a C caller that simply selects method
+    /// 0, since `initiator_new` takes the method as an argument.
+    pub unsafe fn copy_into_c(
+        processing_m2: ProcessingM2,
+        processing_m2_c: *mut ProcessingM2C,
+    ) -> Result<(), EDHOCError> {
         if processing_m2_c.is_null() {
             panic!("processing_m2_c is null");
         }
@@ -229,12 +236,16 @@ impl ProcessingM2C {
                 };
             }
             // TODO: SigSig support for the C bindings
-            ProcessingM2MethodSpecifics::Signature { .. } => todo!(),
+            ProcessingM2MethodSpecifics::Signature { .. } => {
+                return Err(EDHOCError::UnsupportedMethod)
+            }
             // No C representation for the post-quantum method specifics yet; see the
             // catch-all note in initiator.rs.
             #[allow(unreachable_patterns)]
-            _ => todo!(),
+            _ => return Err(EDHOCError::UnsupportedMethod),
         }
+
+        Ok(())
     }
 }
 
@@ -342,7 +353,11 @@ impl ProcessedM2C {
         }
     }
 
-    pub unsafe fn copy_into_c(processed_m2: ProcessedM2, processed_m2_c: *mut ProcessedM2C) {
+    /// Fallible for the same reason as [`ProcessingM2C::copy_into_c`].
+    pub unsafe fn copy_into_c(
+        processed_m2: ProcessedM2,
+        processed_m2_c: *mut ProcessedM2C,
+    ) -> Result<(), EDHOCError> {
         if processed_m2_c.is_null() {
             panic!("processed_m2_c is null");
         }
@@ -372,10 +387,14 @@ impl ProcessedM2C {
                 };
             }
             // TODO: SigSig support for the C bindings
-            ProcessedM2MethodSpecifics::Signature { .. } => todo!(),
+            ProcessedM2MethodSpecifics::Signature { .. } => {
+                return Err(EDHOCError::UnsupportedMethod)
+            }
             #[allow(unreachable_patterns)]
-            _ => todo!(),
+            _ => return Err(EDHOCError::UnsupportedMethod),
         }
+
+        Ok(())
     }
 }
 

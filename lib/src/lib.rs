@@ -2249,6 +2249,35 @@ mod test {
         assert_eq!(m4, 788);
     }
 
+    /// §3.5 end to end: both roles authenticate with a KEM *and* a signature.
+    ///
+    /// Nothing here is new -- it is §3.2's Responder half composed with §3.3's Initiator half,
+    /// `kem.ct_R` on message_3 and `kem.ct_I` on message_4 at once. The sizes are the
+    /// arithmetic that follows, and are the largest of the four variants.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_handshake_kemsig_kemsig() {
+        let (m1, m2, m3, m4) = pq_handshake(EDHOCMethod::PqKemsigKemsig);
+
+        let (s1, s2, s3, _) = pq_handshake(EDHOCMethod::PqSigKemsig);
+        let (k1, _, k3, k4) = pq_handshake(EDHOCMethod::PqKemsigSig);
+
+        assert_eq!(
+            (m1, m2),
+            (s1, s2),
+            "message_1 and message_2 follow R's mode"
+        );
+        assert_eq!(m1, k1);
+        // message_3 is §3.2's: the kem.ct_R prefix plus a signed PLAINTEXT_3.
+        assert_eq!(m3, s3);
+        assert_eq!(m3, k3 + 771, "the kem.ct_R prefix and its bstr header");
+        // message_4 is §3.3's, for the same reason from the other side.
+        assert_eq!(m4, k4);
+
+        assert_eq!((m1, m2, m3, m4), (808, 3196, 3214, 788));
+    }
+
     /// The methods that defer `PRK_out` to message_4 must refuse to finish without it: there
     /// would be no output key at all. §3.2 is unaffected and still allows it.
     #[cfg(feature = "pq")]

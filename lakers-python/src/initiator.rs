@@ -115,7 +115,9 @@ impl PyEdhocInitiator {
             ParsedMessage2Details::StaticDh { id_cred_r } => id_cred_r,
             ParsedMessage2Details::Psk {} => IdCred::new(),
             // TODO: SigSig support for the Python bindings
-            ParsedMessage2Details::Signature { .. } => todo!(),
+            ParsedMessage2Details::Signature { .. } => {
+                return Err(EDHOCError::UnsupportedMethod.into())
+            }
             // Catch-all rather than a cfg'd arm; see the responder for why.
             #[allow(unreachable_patterns)]
             _ => IdCred::new(),

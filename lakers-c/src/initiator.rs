@@ -106,7 +106,9 @@ pub unsafe extern "C" fn initiator_parse_message_2(
 
     let result = match i_parse_message_2(&state, crypto, &(*message_2)) {
         Ok((state, c_r, _details, ead_2)) => {
-            ProcessingM2C::copy_into_c(state, &mut (*initiator_c).processing_m2);
+            if let Err(err) = ProcessingM2C::copy_into_c(state, &mut (*initiator_c).processing_m2) {
+                return err as i8;
+            }
             let c_r = c_r.as_slice();
             assert_eq!(c_r.len(), 1, "C API only supports short C_R");
             *c_r_out = c_r[0];
@@ -177,7 +179,7 @@ pub unsafe extern "C" fn initiator_verify_message_2(
         }
         ProcessingM2MethodSpecifics::Psk {} => cred_expected.ok_or(EDHOCError::MissingIdentity),
         // TODO: SigSig support for the C bindings
-        ProcessingM2MethodSpecifics::Signature { .. } => todo!(),
+        ProcessingM2MethodSpecifics::Signature { .. } => Err(EDHOCError::UnsupportedMethod),
         // Catch-all rather than a cfg'd arm: a `cfg` here tests this crate's own features,
         // not lakers'. The post-quantum methods have no C surface yet.
         #[allow(unreachable_patterns)]
@@ -188,7 +190,9 @@ pub unsafe extern "C" fn initiator_verify_message_2(
         .and_then(|valid_cred_r| i_verify_message_2(&state, crypto, valid_cred_r, identity))
     {
         Ok(state) => {
-            ProcessedM2C::copy_into_c(state, &mut (*initiator_c).processed_m2);
+            if let Err(err) = ProcessedM2C::copy_into_c(state, &mut (*initiator_c).processed_m2) {
+                return err as i8;
+            }
             (*initiator_c).cred_i = cred_i;
             0
         }

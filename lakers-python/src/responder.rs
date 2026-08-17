@@ -52,7 +52,7 @@ impl PyEdhocResponder {
             }
             Ok(ResponderIdentity::Psk) => super::parse_credential(EDHOCMethod::PSK, cred_r),
             // TODO: SigSig support for the Python bindings
-            Ok(ResponderIdentity::Signature { .. }) => todo!(),
+            Ok(ResponderIdentity::Signature { .. }) => Err(EDHOCError::UnsupportedMethod),
             Err(err) => Err(err),
             // Catch-all rather than a `#[cfg(feature = "pq")]` arm: a `cfg` here would test
             // *this* crate's features, but `lakers/pq` can be enabled without it, and feature
