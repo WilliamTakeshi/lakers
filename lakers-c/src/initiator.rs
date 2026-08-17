@@ -178,6 +178,10 @@ pub unsafe extern "C" fn initiator_verify_message_2(
         ProcessingM2MethodSpecifics::Psk {} => cred_expected.ok_or(EDHOCError::MissingIdentity),
         // TODO: SigSig support for the C bindings
         ProcessingM2MethodSpecifics::Signature { .. } => todo!(),
+        // Catch-all rather than a cfg'd arm: a `cfg` here tests this crate's own features,
+        // not lakers'. The post-quantum methods have no C surface yet.
+        #[allow(unreachable_patterns)]
+        _ => Err(EDHOCError::UnsupportedMethod),
     };
 
     match valid_cred_r

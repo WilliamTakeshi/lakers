@@ -230,6 +230,10 @@ impl ProcessingM2C {
             }
             // TODO: SigSig support for the C bindings
             ProcessingM2MethodSpecifics::Signature { .. } => todo!(),
+            // No C representation for the post-quantum method specifics yet; see the
+            // catch-all note in initiator.rs.
+            #[allow(unreachable_patterns)]
+            _ => todo!(),
         }
     }
 }
@@ -369,6 +373,8 @@ impl ProcessedM2C {
             }
             // TODO: SigSig support for the C bindings
             ProcessedM2MethodSpecifics::Signature { .. } => todo!(),
+            #[allow(unreachable_patterns)]
+            _ => todo!(),
         }
     }
 }

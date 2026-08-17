@@ -116,6 +116,9 @@ impl PyEdhocInitiator {
             ParsedMessage2Details::Psk {} => IdCred::new(),
             // TODO: SigSig support for the Python bindings
             ParsedMessage2Details::Signature { .. } => todo!(),
+            // Catch-all rather than a cfg'd arm; see the responder for why.
+            #[allow(unreachable_patterns)]
+            _ => IdCred::new(),
         };
         self.processing_m2 = Some(state);
         Ok((

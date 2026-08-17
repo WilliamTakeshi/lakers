@@ -220,7 +220,12 @@ pub(crate) fn i_verify_message_2_sig(
             Some(valid_cred_r.bytes.as_slice()),
         );
 
-        Ok(VerifiedPeerMessage2 { prk_3e2m, th_3 })
+        Ok(VerifiedPeerMessage2 {
+            prk_3e2m,
+            th_3,
+            #[cfg(feature = "pq")]
+            kem_ct_r: None,
+        })
     } else {
         Err(EDHOCError::MacVerificationFailed)
     }

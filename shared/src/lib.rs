@@ -784,7 +784,21 @@ impl WaitM2 {
 pub enum WaitM3MethodSpecifics {
     Signature {},
     StaticDh {},
-    Psk { cred_r: Credential },
+    Psk {
+        cred_r: Credential,
+    },
+    /// For the post-quantum methods the Responder is mid-ladder at this point. When it
+    /// authenticates by KEM it cannot know `PRK_3e2m` yet -- `ss_R` only exists once the
+    /// Initiator encapsulates and sends `kem.ct_R` in message_3 -- so it carries `PRK_2e` and
+    /// its own decapsulation key forward instead, and derives `PRK_3e2m` on receiving
+    /// message_3.
+    #[cfg(feature = "pq")]
+    Pq {
+        i_mode: PqAuthMode,
+        r_mode: PqAuthMode,
+        prk_2e: BytesHashLen,
+        kem_dk: Option<BytesKemDecapsKey>,
+    },
 }
 #[derive(Debug)]
 pub struct WaitM3 {
@@ -831,6 +845,13 @@ pub enum ProcessingM2MethodSpecifics {
         id_cred_r: IdCred,
     },
     Psk {},
+    /// `signature_2` is absent exactly when the Responder authenticates by KEM alone (§3.4).
+    #[cfg(feature = "pq")]
+    Pq {
+        r_mode: PqAuthMode,
+        signature_2: Option<BytesPqSignature>,
+        id_cred_r: IdCred,
+    },
 }
 #[derive(Debug)]
 #[repr(C)]
@@ -847,17 +868,39 @@ pub struct ProcessingM2 {
 
 #[derive(Debug)]
 pub enum ParsedMessage2Details {
-    Signature { id_cred_r: IdCred },
-    StaticDh { id_cred_r: IdCred },
+    Signature {
+        id_cred_r: IdCred,
+    },
+    StaticDh {
+        id_cred_r: IdCred,
+    },
     Psk {},
+    #[cfg(feature = "pq")]
+    Pq {
+        id_cred_r: IdCred,
+    },
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub enum ProcessedM2MethodSpecifics {
-    Signature { i: BytesP256ElemLen },
+    Signature {
+        i: BytesP256ElemLen,
+    },
     StaticDh {},
-    Psk { cred_r: Credential },
+    Psk {
+        cred_r: Credential,
+    },
+    /// `kem_ct_r` is the ciphertext the Initiator produced against the Responder's static KEM
+    /// key; it has to ride in message_3 so the Responder can complete its own ladder.
+    /// `dsa_sk` is kept for the same reason `Signature` keeps `i`: message_3 still has to be
+    /// signed.
+    #[cfg(feature = "pq")]
+    Pq {
+        i_mode: PqAuthMode,
+        kem_ct_r: Option<BytesKemCiphertext>,
+        dsa_sk: Option<BytesPqSignKey>,
+    },
 }
 
 #[derive(Debug)]

@@ -567,6 +567,12 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiatorProcessingM2<Crypto> {
             | ProcessingM2MethodSpecifics::StaticDh { id_cred_r, .. } => {
                 credential_check_or_fetch(cred_expected, id_cred_r.clone())?
             }
+            // ID_CRED_R is present for every post-quantum mode, including the KEM-only one:
+            // the Initiator needs it to know which static key to encapsulate to.
+            #[cfg(feature = "pq")]
+            ProcessingM2MethodSpecifics::Pq { id_cred_r, .. } => {
+                credential_check_or_fetch(cred_expected, id_cred_r.clone())?
+            }
             ProcessingM2MethodSpecifics::Psk {} => {
                 cred_expected.ok_or(EDHOCError::MissingIdentity)?
             }
@@ -1550,6 +1556,124 @@ mod test {
         };
         assert_eq!(both.mode(), PqAuthMode::KemSign);
         assert!(both.kem_dk().is_some() && both.dsa_sk().is_some());
+    }
+
+    /// Build a §3.2 credential pair: the Responder authenticates with KEM & signature, the
+    /// Initiator with a signature alone.
+    #[cfg(feature = "pq")]
+    fn pq_responder_material(crypto: &mut impl CryptoTrait) -> (Credential, ResponderIdentity) {
+        use lakers_shared::BufferCred;
+
+        let (kem_dk, kem_ek) = crypto.kem_generate_key_pair().unwrap();
+        let (dsa_sk, dsa_pk) = crypto.mldsa_generate_key_pair().unwrap();
+
+        // { 8: { 1: { 1: 7, 2: h'32', -1: <ML-DSA pk>, -2: <ML-KEM ek> } } }
+        let mut ccs = BufferCred::new();
+        ccs.extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01, 0xa4, 0x01, 0x07, 0x02, 0x41, 0x32])
+            .unwrap();
+        ccs.extend_from_slice(&[0x20, 0x59, 0x05, 0x20]).unwrap();
+        ccs.extend_from_slice(&dsa_pk).unwrap();
+        ccs.extend_from_slice(&[0x21, 0x59, 0x03, 0x20]).unwrap();
+        ccs.extend_from_slice(&kem_ek).unwrap();
+
+        let cred_r = Credential::parse_ccs(ccs.as_slice()).unwrap();
+        (
+            cred_r,
+            ResponderIdentity::Pq(PqIdentity::KemSign { kem_dk, dsa_sk }),
+        )
+    }
+
+    /// §3.2's message_2, end to end: the Responder signs a MAC_2 keyed by PRK_2e with ML-DSA,
+    /// and the Initiator verifies it and encapsulates to the Responder's static KEM key.
+    ///
+    /// PRK_2e rather than PRK_3e2m is the whole point -- the Responder authenticates by KEM
+    /// here, so ss_R does not exist yet and PRK_3e2m is not computable at message_2.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_message_2_sig_kemsig() {
+        let mut crypto = default_crypto();
+        let (cred_r, r_identity) = pq_responder_material(&mut crypto);
+        let (dsa_sk_i, _dsa_pk_i) = crypto.mldsa_generate_key_pair().unwrap();
+        let cred_i = Credential::parse_ccs(CRED_I.try_into().unwrap()).unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let responder = EdhocResponder::new(default_crypto(), r_identity, cred_r.clone());
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (_responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .expect("responder signs MAC_2 with ML-DSA");
+
+        // kem.ct_eph (768) + C_R + ID_CRED_R + a 2420-byte ML-DSA signature.
+        assert!(
+            message_2.len() > 768 + PQ_SIGNATURE_LENGTH,
+            "message_2 was {} bytes",
+            message_2.len()
+        );
+
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        initiator
+            .set_identity(
+                InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk: dsa_sk_i }),
+                cred_i,
+            )
+            .unwrap();
+        initiator
+            .verify_message_2(Some(cred_r))
+            .expect("initiator verifies SIGNATURE_2 and encapsulates to kem.pk_R");
+    }
+
+    /// A tampered SIGNATURE_2 must be rejected, not merely produce a different key.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_message_2_rejects_tampered_signature() {
+        let mut crypto = default_crypto();
+        let (cred_r, r_identity) = pq_responder_material(&mut crypto);
+        let (dsa_sk_i, _) = crypto.mldsa_generate_key_pair().unwrap();
+        let cred_i = Credential::parse_ccs(CRED_I.try_into().unwrap()).unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let responder = EdhocResponder::new(default_crypto(), r_identity, cred_r.clone());
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (_responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+
+        // Flip a bit inside CIPHERTEXT_2, past kem.ct_eph and the bstr header.
+        let mut tampered = message_2.clone();
+        let last = tampered.len() - 1;
+        #[allow(deprecated)]
+        {
+            tampered.content[last] ^= 0x01;
+        }
+
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&tampered).unwrap();
+        initiator
+            .set_identity(
+                InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk: dsa_sk_i }),
+                cred_i,
+            )
+            .unwrap();
+        assert_eq!(
+            initiator
+                .verify_message_2(Some(cred_r))
+                .map(|_| ())
+                .unwrap_err(),
+            EDHOCError::MacVerificationFailed
+        );
     }
 
     /// The public API up to the point the ephemeral KEM reaches: the Initiator generates an

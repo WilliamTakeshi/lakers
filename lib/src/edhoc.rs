@@ -1,6 +1,8 @@
 use crate::InitiatorIdentity;
 use digest::Digest;
 use lakers_shared::{Crypto as CryptoTrait, *};
+#[cfg(feature = "pq")]
+mod pq;
 mod psk;
 mod sig;
 mod stat;
@@ -53,6 +55,11 @@ struct VerifiedMessage2 {
 struct VerifiedPeerMessage2 {
     prk_3e2m: BytesHashLen,
     th_3: BytesHashLen,
+    /// The ciphertext the Initiator produced against the Responder's static KEM key, which
+    /// message_3 has to carry. `None` for every classical method and for a Responder that
+    /// only signs.
+    #[cfg(feature = "pq")]
+    kem_ct_r: Option<BytesKemCiphertext>,
 }
 #[derive(Debug)]
 struct PreparedMessage3 {
@@ -247,8 +254,27 @@ pub fn r_prepare_message_2(
     c_r: ConnId,
     ead_2: &EadItems,
 ) -> Result<(WaitM3, BufferMessage2), EDHOCError> {
-    let th_2 = compute_th_2(crypto, &state.g_y[..], &state.h_message_1)?;
-    let prk_2e = compute_prk_2e(crypto, &state.y, &state.g_x, &th_2);
+    // The ephemeral element is `G_Y` classically and `kem.ct_eph` for the post-quantum
+    // methods, and `PRK_2e` is extracted from `G_XY` or `ss_eph` correspondingly.
+    #[cfg(feature = "pq")]
+    let (th_2, prk_2e, eph): (_, _, &[u8]) = match &state.kem_eph {
+        Some(kem_eph) => {
+            let th_2 = compute_th_2(crypto, &kem_eph.ct_eph[..], &state.h_message_1)?;
+            let prk_2e = compute_prk_2e_pq(crypto, &kem_eph.ss_eph, &th_2);
+            (th_2, prk_2e, &kem_eph.ct_eph[..])
+        }
+        None => {
+            let th_2 = compute_th_2(crypto, &state.g_y[..], &state.h_message_1)?;
+            let prk_2e = compute_prk_2e(crypto, &state.y, &state.g_x, &th_2);
+            (th_2, prk_2e, &state.g_y[..])
+        }
+    };
+    #[cfg(not(feature = "pq"))]
+    let (th_2, prk_2e, eph): (_, _, &[u8]) = {
+        let th_2 = compute_th_2(crypto, &state.g_y[..], &state.h_message_1)?;
+        let prk_2e = compute_prk_2e(crypto, &state.y, &state.g_x, &th_2);
+        (th_2, prk_2e, &state.g_y[..])
+    };
 
     let prepared = match (state.method, method_details) {
         (
@@ -283,6 +309,31 @@ pub fn r_prepare_message_2(
         (EDHOCMethod::PSK, PrepareMessage2Details::Psk) => {
             r_prepare_message_2_psk(crypto, cred_r, c_r, ead_2, &th_2, &prk_2e)?
         }
+        #[cfg(feature = "pq")]
+        (
+            method,
+            PrepareMessage2Details::Pq {
+                mode,
+                kem_dk,
+                dsa_sk,
+                cred_transfer,
+            },
+        ) if method.pq_modes().is_some_and(|(_, r)| r == mode) => {
+            let (i_mode, r_mode) = method.pq_modes().unwrap();
+            pq::r_prepare_message_2_pq(
+                crypto,
+                cred_r,
+                dsa_sk,
+                kem_dk,
+                c_r,
+                cred_transfer,
+                ead_2,
+                &th_2,
+                &prk_2e,
+                i_mode,
+                r_mode,
+            )?
+        }
         _ => return Err(EDHOCError::UnsupportedMethod),
     };
 
@@ -293,7 +344,7 @@ pub fn r_prepare_message_2(
 
     ct.fill_with_slice(ciphertext_2.as_slice()).unwrap(); // TODO(hax): same as just above.
 
-    let message_2 = encode_message_2(&state.g_y[..], &ct)?;
+    let message_2 = encode_message_2(eph, &ct)?;
 
     Ok((
         WaitM3 {
@@ -317,6 +368,10 @@ pub fn r_parse_message_3(
         WaitM3MethodSpecifics::Psk { cred_r } => {
             r_parse_message_3_psk(state, crypto, message_3, cred_r)?
         }
+        // message_3 carries kem.ct_R, from which PRK_3e2m has to be derived before the
+        // ciphertext can be decrypted at all. Wired up next.
+        #[cfg(feature = "pq")]
+        WaitM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
     };
 
     Ok((
@@ -352,6 +407,8 @@ where
             cred_r,
             resolve_cred_i,
         )?,
+        #[cfg(feature = "pq")]
+        WaitM3MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
     };
 
     Ok((
@@ -479,15 +536,41 @@ pub fn i_parse_message_2<'a>(
     crypto: &mut impl CryptoTrait,
     message_2: &BufferMessage2,
 ) -> Result<(ProcessingM2, ConnId, ParsedMessage2Details, EadItems), EDHOCError> {
-    let (g_y, ciphertext_2) = parse_message_2(message_2)?;
-    let th_2 = compute_th_2(crypto, &g_y[..], &state.h_message_1)?;
-    let prk_2e = compute_prk_2e(crypto, &state.x, &g_y, &th_2);
+    // Unlike the Responder with message_1, the Initiator knows its own method, so it knows
+    // how wide the leading ephemeral element is before parsing.
+    #[cfg(feature = "pq")]
+    let (g_y, th_2, prk_2e, ciphertext_2) = match &state.kem_sk_eph {
+        Some(kem_sk_eph) => {
+            let (ct_eph, ciphertext_2) = parse_message_2_sized::<ML_KEM_CIPHERTEXT_LEN>(message_2)?;
+            let ss_eph = crypto.kem_decapsulate(kem_sk_eph, &ct_eph)?;
+            let th_2 = compute_th_2(crypto, &ct_eph[..], &state.h_message_1)?;
+            let prk_2e = compute_prk_2e_pq(crypto, &ss_eph, &th_2);
+            ([0x00; P256_ELEM_LEN], th_2, prk_2e, ciphertext_2)
+        }
+        None => {
+            let (g_y, ciphertext_2) = parse_message_2(message_2)?;
+            let th_2 = compute_th_2(crypto, &g_y[..], &state.h_message_1)?;
+            let prk_2e = compute_prk_2e(crypto, &state.x, &g_y, &th_2);
+            (g_y, th_2, prk_2e, ciphertext_2)
+        }
+    };
+    #[cfg(not(feature = "pq"))]
+    let (g_y, th_2, prk_2e, ciphertext_2) = {
+        let (g_y, ciphertext_2) = parse_message_2(message_2)?;
+        let th_2 = compute_th_2(crypto, &g_y[..], &state.h_message_1)?;
+        let prk_2e = compute_prk_2e(crypto, &state.x, &g_y, &th_2);
+        (g_y, th_2, prk_2e, ciphertext_2)
+    };
     let plaintext_2 = encrypt_decrypt_ciphertext_2(crypto, &prk_2e, &th_2, &ciphertext_2);
 
     let decoded = match state.method {
         EDHOCMethod::SigSig | EDHOCMethod::StatSig => i_parse_message_2_sig(&plaintext_2),
         EDHOCMethod::SigStat | EDHOCMethod::StatStat => i_parse_message_2_stat(&plaintext_2),
         EDHOCMethod::PSK => i_parse_message_2_psk(&plaintext_2),
+        #[cfg(feature = "pq")]
+        method if method.pq_modes().is_some() => {
+            pq::i_parse_message_2_pq(&plaintext_2, method.pq_modes().unwrap().1)
+        }
         _ => Err(EDHOCError::UnsupportedMethod),
     }?;
 
@@ -534,11 +617,22 @@ pub fn i_verify_message_2(
         (ProcessingM2MethodSpecifics::StaticDh { .. }, _) => {
             i_verify_message_2_stat(state, crypto, valid_cred_r)?
         }
+        #[cfg(feature = "pq")]
+        (ProcessingM2MethodSpecifics::Pq { .. }, InitiatorIdentity::Pq(_)) => {
+            pq::i_verify_message_2_pq(state, crypto, valid_cred_r)?
+        }
         // FIXME: it is not an error, but more a lack of agreement between peers.
         _ => return Err(EDHOCError::MissingIdentity), // or UnsupportedMethod
     };
 
+    #[cfg(not(feature = "pq"))]
     let VerifiedPeerMessage2 { prk_3e2m, th_3 } = peer_verified;
+    #[cfg(feature = "pq")]
+    let VerifiedPeerMessage2 {
+        prk_3e2m,
+        th_3,
+        kem_ct_r,
+    } = peer_verified;
 
     let (prk_4e3m, method_specifics) = match &i {
         InitiatorIdentity::Signature { i } => {
@@ -553,10 +647,24 @@ pub fn i_verify_message_2(
         }
         // FIXME: it is not an error, but more a lack of agreement between peers.
         InitiatorIdentity::Psk => return Err(EDHOCError::MissingIdentity),
-        // The post-quantum protocol steps are not wired up yet; the identity plumbing lands
-        // first so the method/identity agreement checks can be built and tested against it.
         #[cfg(feature = "pq")]
-        InitiatorIdentity::Pq(_) => return Err(EDHOCError::UnsupportedMethod),
+        InitiatorIdentity::Pq(identity) => {
+            // §3.2's Initiator signs, so PRK_4e3m == PRK_3e2m, exactly as in RFC 9528's
+            // signature methods. When the Initiator uses a KEM instead, ss_I only arrives in
+            // message_4, so PRK_4e3m cannot be derived here at all -- that is the deferred
+            // prk_out work, and those modes are rejected until it lands.
+            if identity.mode().uses_kem() {
+                return Err(EDHOCError::UnsupportedMethod);
+            }
+            (
+                prk_3e2m,
+                ProcessedM2MethodSpecifics::Pq {
+                    i_mode: identity.mode(),
+                    kem_ct_r,
+                    dsa_sk: identity.dsa_sk().copied(),
+                },
+            )
+        }
     };
 
     Ok(ProcessedM2 {
@@ -584,6 +692,9 @@ pub fn i_prepare_message_3(
         ProcessedM2MethodSpecifics::Psk { .. } => {
             i_prepare_message_3_psk(state, crypto, cred_i, cred_transfer, ead_3)?
         }
+        // Needs the kem.ct_R prefix and an ML-DSA SIGNATURE_3; wired up next.
+        #[cfg(feature = "pq")]
+        ProcessedM2MethodSpecifics::Pq { .. } => return Err(EDHOCError::UnsupportedMethod),
     };
 
     let mut prk_out: BytesHashLen = Default::default();
