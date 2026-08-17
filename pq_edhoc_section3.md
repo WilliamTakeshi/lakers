@@ -388,12 +388,51 @@ keypair and a static signature keypair (§3.5.4 says so explicitly). Nothing sta
 public keys live under a single `ID_CRED`, how `CRED` is formed, or how a verifier knows which
 is which.
 
-**Proposed:** a CCS whose `cnf` claim holds two COSE_Keys distinguished by `kty`/`alg`. The
-concrete CBOR the lakers prototype adopts will be appended to this document when it is
-implemented, and is offered as proposed text.
+**Proposed**, and implemented in the lakers prototype. Keep the CCS shape of RFC 9528 §3.5.2
+exactly — one `cnf` claim, holding one COSE_Key — and put both public keys in that one
+COSE_Key, using the `AKP` key type from `draft-ietf-cose-post-quantum-signatures` with one
+added label:
+
+```cddl
+CRED_x = {
+  ? 2 => tstr,                 ; sub, ignored
+    8 => { 1 => PQ_COSE_Key }  ; cnf
+}
+
+PQ_COSE_Key = {
+    1  => 7,                   ; kty: AKP
+  ? 2  => bstr,                ; kid
+  ? -1 => bstr .size 1312,     ; AKP "pub": the ML-DSA-44 verification key
+  ? -2 => bstr .size 800       ; local extension: the ML-KEM-512 encapsulation key
+}
+```
+
+At least one of `-1` / `-2` MUST be present; which are present is exactly what tells a verifier
+whether the peer signs, uses a KEM, or both, so no separate mode signal is needed. Because the
+labels differ per key type, `kty` MUST precede them — which deterministic CBOR ordering already
+guarantees, since `1` sorts before `-1`.
+
+**This is deliberately the smallest possible divergence, not the most elegant option.** It is
+*not* AKP-conformant: AKP carries one algorithm's key per COSE_Key, with `alg` naming the
+algorithm and `-1` the public key. Two alternatives were considered and rejected for this
+prototype:
+
+| Alternative                                          | Why not                                                                                                                              |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `cnf` holds an array of two AKP COSE_Keys            | RFC 8747 defines the `cnf` member `1` as a COSE_Key, not an array of them. Changing that is a larger break than adding one key label. |
+| A second CWT claim carrying the KEM key              | Cleanest and fully AKP-conformant, but needs a CWT claim number, and the private-use range is negative — more machinery than a prototype needs. |
+
+The second row is probably the right long-term answer and the WG should consider it; the
+prototype's choice is what a parser could support with one extra match arm.
+
+Two further points the WG will need to settle, which this encoding sidesteps rather than
+solves: COSE has no registered `alg` for ML-KEM at all, so the KEM key here is identified by
+its label and size rather than by an algorithm identifier; and neither key carries an `alg`,
+so the parameter set is pinned by the cipher suite alone.
 
 Note the size consequence: a `CRED` transferred by value grows from ~107 B to ~2.2 KB
-(ML-DSA-44 public key 1312 B + ML-KEM-512 encapsulation key 800 B).
+(ML-DSA-44 public key 1312 B + ML-KEM-512 encapsulation key 800 B). That alone puts
+`CredentialTransfer::ByValue` out of reach for constrained links.
 
 ### D9 — §3.2 never defines `K_4`/`IV_4` · **E**
 
@@ -504,6 +543,7 @@ resolution proposed above.
 | Cipher suite              | none                                     | one locally-chosen suite, marked TBD    | D6 |
 | Hash                      | SHAKE256 (via pqsuites)                  | **SHA-256**                             | prototype scope; both are 32-byte outputs so the key schedule and all sizes are unaffected. A deliberate, documented divergence. |
 | CBOR encodings            | none                                     | as in D7                                | D7 |
+| Two-key credential        | none                                     | one AKP COSE_Key, `-1` sig / `-2` KEM   | D8 |
 
 ---
 

@@ -6,11 +6,38 @@ pub type BufferIdCred = EdhocBuffer<MAX_CRED_LEN>; // variable size, can contain
 pub type BytesKeyAES128 = [u8; 16];
 pub type BytesKeyEC2 = [u8; 32];
 
+/// COSE `kty` values this implementation understands.
+const COSE_KTY_EC2: u8 = 2;
+/// `AKP` (Algorithm Key Pair), from draft-ietf-cose-post-quantum-signatures.
+///
+/// **Locally extended, and not AKP-conformant.** AKP carries one algorithm's key per
+/// COSE_Key, with the public key at label -1. A draft-papon-lake-pq-edhoc role that
+/// authenticates with "KEM & signature" needs *two* public keys under one `ID_CRED`, and the
+/// draft does not say how (gap D8 in `pq_edhoc_section3.md`). This implementation keeps the
+/// AKP key type and its -1 label for the signature key, and adds -2 for the KEM key. See that
+/// document for the rationale and the alternatives considered.
+#[cfg(feature = "pq")]
+const COSE_KTY_AKP: u8 = 7;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C)]
 pub enum CredentialKey {
     Symmetric(BytesKeyAES128),
     EC2Compact(BytesKeyEC2),
+    /// An ML-KEM-512 encapsulation key, for a role that authenticates by KEM alone (§3.4's
+    /// Responder).
+    #[cfg(feature = "pq")]
+    MlKem(BytesKemEncapsKey),
+    /// An ML-DSA-44 verification key, for a role that authenticates by signature alone
+    /// (§3.2's Initiator, §3.3's Responder).
+    #[cfg(feature = "pq")]
+    MlDsa(BytesPqVerifyKey),
+    /// Both, for a role that authenticates with "KEM & signature".
+    #[cfg(feature = "pq")]
+    MlKemMlDsa {
+        kem: BytesKemEncapsKey,
+        dsa: BytesPqVerifyKey,
+    },
     // Add other key types as needed
 }
 
@@ -210,9 +237,52 @@ impl Credential {
         }
     }
 
+    /// Creates a new CCS credential holding post-quantum public keys.
+    ///
+    /// At least one of the two must be present; a credential with neither authenticates
+    /// nothing.
+    #[cfg(feature = "pq")]
+    pub fn new_ccs_pq(
+        bytes: BufferCred,
+        kem: Option<BytesKemEncapsKey>,
+        dsa: Option<BytesPqVerifyKey>,
+    ) -> Result<Self, EDHOCError> {
+        let key = match (kem, dsa) {
+            (Some(kem), Some(dsa)) => CredentialKey::MlKemMlDsa { kem, dsa },
+            (Some(kem), None) => CredentialKey::MlKem(kem),
+            (None, Some(dsa)) => CredentialKey::MlDsa(dsa),
+            (None, None) => return Err(EDHOCError::UnexpectedCredential),
+        };
+
+        Ok(Self {
+            bytes,
+            key,
+            kid: None,
+            cred_type: CredentialType::CCS,
+        })
+    }
+
     pub fn public_key(&self) -> Option<BytesKeyEC2> {
         match self.key {
             CredentialKey::EC2Compact(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// The ML-KEM-512 encapsulation key, for a peer that authenticates by KEM.
+    #[cfg(feature = "pq")]
+    pub fn kem_public_key(&self) -> Option<BytesKemEncapsKey> {
+        match self.key {
+            CredentialKey::MlKem(kem) | CredentialKey::MlKemMlDsa { kem, .. } => Some(kem),
+            _ => None,
+        }
+    }
+
+    /// The ML-DSA-44 verification key, for a peer that authenticates by signature.
+    #[cfg(feature = "pq")]
+    pub fn dsa_public_key(&self) -> Option<BytesPqVerifyKey> {
+        match self.key {
+            CredentialKey::MlDsa(dsa) | CredentialKey::MlKemMlDsa { dsa, .. } => Some(dsa),
             _ => None,
         }
     }
@@ -332,15 +402,26 @@ impl Credential {
         decoder: &mut CBORDecoder<'data>,
     ) -> Result<(CredentialKey, Option<BufferKid>), EDHOCError> {
         let items = decoder.map()?;
+        let mut kty = None;
         let mut x = None;
         let mut kid = None;
+        #[cfg(feature = "pq")]
+        let mut pq_dsa: Option<BytesPqVerifyKey> = None;
+        #[cfg(feature = "pq")]
+        let mut pq_kem: Option<BytesKemEncapsKey> = None;
+
         for _ in 0..items {
             match decoder.i8()? {
-                // kty: EC2
+                // kty
                 1 => {
-                    if decoder.u8()? != 2 {
-                        return Err(EDHOCError::ParsingError);
+                    let value = decoder.u8()?;
+                    match value {
+                        COSE_KTY_EC2 => {}
+                        #[cfg(feature = "pq")]
+                        COSE_KTY_AKP => {}
+                        _ => return Err(EDHOCError::ParsingError),
                     }
+                    kty = Some(value);
                 }
                 // kid: bytes. Note that this is always a byte string, even if in other places it's used
                 // with integer compression.
@@ -351,24 +432,53 @@ impl Credential {
                             .map_err(|_| EDHOCError::ParsingError)?,
                     );
                 }
-                // crv: p-256
-                -1 => {
-                    if decoder.u8()? != 1 {
-                        return Err(EDHOCError::ParsingError);
+                // The meaning of the negative labels depends on kty, so kty has to have been
+                // seen already. Deterministic CBOR orders label 1 before -1, so a conforming
+                // encoder always satisfies this.
+                -1 => match kty {
+                    // crv: p-256
+                    Some(COSE_KTY_EC2) => {
+                        if decoder.u8()? != 1 {
+                            return Err(EDHOCError::ParsingError);
+                        }
                     }
-                }
-                // x
-                -2 => {
-                    x = Some(CredentialKey::EC2Compact(
-                        decoder
-                            .bytes()?
-                            // Wrong length
-                            .try_into()
-                            .map_err(|_| EDHOCError::ParsingError)?,
-                    ));
-                }
+                    // AKP pub: the ML-DSA-44 verification key
+                    #[cfg(feature = "pq")]
+                    Some(COSE_KTY_AKP) => {
+                        pq_dsa = Some(
+                            decoder
+                                .bytes()?
+                                .try_into()
+                                .map_err(|_| EDHOCError::ParsingError)?,
+                        );
+                    }
+                    _ => return Err(EDHOCError::ParsingError),
+                },
+                -2 => match kty {
+                    // x
+                    Some(COSE_KTY_EC2) => {
+                        x = Some(CredentialKey::EC2Compact(
+                            decoder
+                                .bytes()?
+                                // Wrong length
+                                .try_into()
+                                .map_err(|_| EDHOCError::ParsingError)?,
+                        ));
+                    }
+                    // Local extension: the ML-KEM-512 encapsulation key
+                    #[cfg(feature = "pq")]
+                    Some(COSE_KTY_AKP) => {
+                        pq_kem = Some(
+                            decoder
+                                .bytes()?
+                                .try_into()
+                                .map_err(|_| EDHOCError::ParsingError)?,
+                        );
+                    }
+                    _ => return Err(EDHOCError::ParsingError),
+                },
                 // y
-                -3 => {
+                -3 if kty == Some(COSE_KTY_EC2) => {
                     let _ = decoder.bytes()?;
                 }
                 _ => {
@@ -376,6 +486,19 @@ impl Credential {
                 }
             }
         }
+
+        #[cfg(feature = "pq")]
+        if kty == Some(COSE_KTY_AKP) {
+            let key = match (pq_kem, pq_dsa) {
+                (Some(kem), Some(dsa)) => CredentialKey::MlKemMlDsa { kem, dsa },
+                (Some(kem), None) => CredentialKey::MlKem(kem),
+                (None, Some(dsa)) => CredentialKey::MlDsa(dsa),
+                // A PQ credential carrying neither key authenticates nothing.
+                (None, None) => return Err(EDHOCError::ParsingError),
+            };
+            return Ok((key, kid));
+        }
+
         Ok((x.ok_or(EDHOCError::ParsingError)?, kid))
     }
 
@@ -566,5 +689,128 @@ mod test_experimental {
         assert_eq!(cred.key, CredentialKey::Symmetric(K.try_into().unwrap()));
         assert_eq!(cred.kid.unwrap().as_slice(), KID_VALUE_PSK);
         assert_eq!(cred.cred_type, CredentialType::CCS_PSK);
+    }
+}
+
+/// The CCS encoding this implementation defines for post-quantum credentials.
+///
+/// The draft does not specify one (gap D8); this is our proposal, and these tests are what
+/// pin it. See `pq_edhoc_section3.md` for the rationale and the alternatives considered.
+#[cfg(feature = "pq")]
+#[cfg(test)]
+mod test_pq {
+    use super::*;
+    use hexlit::hex;
+
+    /// Builds
+    ///
+    /// ```text
+    /// { 8 (cnf): { 1: { 1 (kty): 7 (AKP), 2 (kid): h'2b',
+    ///                  -1 (pub): bstr .size 1312,   ; ML-DSA-44 verification key
+    ///                  -2:       bstr .size 800 } } } ; ML-KEM-512 encapsulation key
+    /// ```
+    fn build_pq_ccs(kem: Option<&[u8]>, dsa: Option<&[u8]>) -> BufferCred {
+        let entries = 2 + u8::from(dsa.is_some()) + u8::from(kem.is_some());
+
+        let mut out = BufferCred::new();
+        out.extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01]).unwrap();
+        out.push(0xa0 | entries).unwrap();
+        out.extend_from_slice(&[0x01, COSE_KTY_AKP]).unwrap();
+        out.extend_from_slice(&[0x02, 0x41, 0x2b]).unwrap();
+        for (label, key) in [(0x20u8, dsa), (0x21u8, kem)] {
+            if let Some(key) = key {
+                out.push(label).unwrap();
+                out.extend_from_slice(&[0x59, (key.len() >> 8) as u8, key.len() as u8])
+                    .unwrap();
+                out.extend_from_slice(key).unwrap();
+            }
+        }
+        out
+    }
+
+    /// The whole CCS is ~2.1 kB, so it needs `max_cred_len_4096`.
+    fn buffers_are_big_enough() -> bool {
+        MAX_CRED_LEN >= 4096
+    }
+
+    fn sample_dsa() -> BytesPqVerifyKey {
+        core::array::from_fn(|i| (i % 251) as u8)
+    }
+
+    fn sample_kem() -> BytesKemEncapsKey {
+        core::array::from_fn(|i| (i % 241) as u8)
+    }
+
+    #[test]
+    fn test_parse_pq_ccs_both_keys() {
+        if !buffers_are_big_enough() {
+            return;
+        }
+        let (kem, dsa) = (sample_kem(), sample_dsa());
+        let ccs = build_pq_ccs(Some(&kem), Some(&dsa));
+
+        let cred = Credential::parse_ccs(ccs.as_slice()).unwrap();
+        assert_eq!(cred.key, CredentialKey::MlKemMlDsa { kem, dsa });
+        assert_eq!(cred.kem_public_key().unwrap(), kem);
+        assert_eq!(cred.dsa_public_key().unwrap(), dsa);
+        assert_eq!(cred.public_key(), None);
+        assert_eq!(cred.kid.unwrap().as_slice(), &[0x2b]);
+    }
+
+    #[test]
+    fn test_parse_pq_ccs_single_key() {
+        if !buffers_are_big_enough() {
+            return;
+        }
+        let (kem, dsa) = (sample_kem(), sample_dsa());
+
+        let cred = Credential::parse_ccs(build_pq_ccs(None, Some(&dsa)).as_slice()).unwrap();
+        assert_eq!(cred.key, CredentialKey::MlDsa(dsa));
+        assert_eq!(cred.dsa_public_key().unwrap(), dsa);
+        assert_eq!(cred.kem_public_key(), None);
+
+        let cred = Credential::parse_ccs(build_pq_ccs(Some(&kem), None).as_slice()).unwrap();
+        assert_eq!(cred.key, CredentialKey::MlKem(kem));
+        assert_eq!(cred.kem_public_key().unwrap(), kem);
+        assert_eq!(cred.dsa_public_key(), None);
+    }
+
+    #[test]
+    fn test_parse_pq_ccs_rejects_keyless_and_malformed() {
+        if !buffers_are_big_enough() {
+            return;
+        }
+        // Neither key present: authenticates nothing.
+        assert!(Credential::parse_ccs(build_pq_ccs(None, None).as_slice()).is_err());
+
+        // Wrong length for the ML-DSA key.
+        let short = [0u8; 64];
+        assert!(Credential::parse_ccs(build_pq_ccs(None, Some(&short)).as_slice()).is_err());
+
+        // A key parameter before kty cannot be interpreted, and must not be guessed at.
+        let mut no_kty = BufferCred::new();
+        no_kty
+            .extend_from_slice(&[0xa1, 0x08, 0xa1, 0x01, 0xa1, 0x20])
+            .unwrap();
+        let dsa = sample_dsa();
+        no_kty.extend_from_slice(&[0x59, 0x05, 0x20]).unwrap();
+        no_kty.extend_from_slice(&dsa).unwrap();
+        assert!(Credential::parse_ccs(no_kty.as_slice()).is_err());
+    }
+
+    #[test]
+    fn test_new_ccs_pq_requires_a_key() {
+        assert!(Credential::new_ccs_pq(BufferCred::new(), None, None).is_err());
+    }
+
+    /// Classical EC2 credentials must keep parsing exactly as before.
+    #[test]
+    fn test_ec2_unaffected() {
+        // Same RFC 9529 credential as `test::CRED_TV`.
+        const EC2_CCS: &[u8] = &hex!("a2026b6578616d706c652e65647508a101a501020241322001215820bbc34960526ea4d32e940cad2a234148ddc21791a12afbcbac93622046dd44f02258204519e257236b2a0ce2023f0931f1f386ca7afda64fcde0108c224c51eabf6072");
+        let cred = Credential::parse_ccs(EC2_CCS).unwrap();
+        assert!(cred.public_key().is_some());
+        assert_eq!(cred.kem_public_key(), None);
+        assert_eq!(cred.dsa_public_key(), None);
     }
 }
