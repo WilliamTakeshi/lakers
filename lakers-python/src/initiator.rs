@@ -54,12 +54,7 @@ impl PyEdhocInitiator {
 
         Ok(Self {
             cred_i: None,
-            start: InitiatorStart {
-                x,
-                g_x,
-                method,
-                suites_i,
-            },
+            start: InitiatorStart::new_dh(suites_i, method, x, g_x),
             wait_m2: None,
             processing_m2: None,
             processed_m2: None,

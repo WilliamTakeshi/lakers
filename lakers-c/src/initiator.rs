@@ -26,12 +26,7 @@ pub unsafe extern "C" fn initiator_new(initiator: *mut EdhocInitiator, method: E
         prepare_suites_i(&crypto.supported_suites(), EDHOCSuite::CipherSuite2.into()).unwrap();
     let (x, g_x) = crypto.p256_generate_key_pair();
 
-    let start = InitiatorStart {
-        x,
-        g_x,
-        suites_i,
-        method,
-    };
+    let start = InitiatorStart::new_dh(suites_i, method, x, g_x);
 
     core::ptr::write(&mut (*initiator).start, start);
 
@@ -322,17 +317,17 @@ mod tests {
     fn make_ffi_initiator() -> EdhocInitiator {
         EdhocInitiator {
             method: EDHOCMethod::StatStat,
-            start: InitiatorStart {
-                suites_i: Default::default(),
-                method: EDHOCMethod::StatStat,
-                x: Default::default(),
-                g_x: Default::default(),
-            },
-            wait_m2: WaitM2 {
-                method: EDHOCMethod::StatStat,
-                x: Default::default(),
-                h_message_1: Default::default(),
-            },
+            start: InitiatorStart::new_dh(
+                Default::default(),
+                EDHOCMethod::StatStat,
+                Default::default(),
+                Default::default(),
+            ),
+            wait_m2: WaitM2::new_dh(
+                EDHOCMethod::StatStat,
+                Default::default(),
+                Default::default(),
+            ),
             processing_m2: ProcessingM2C::default(),
             processed_m2: ProcessedM2C::default(),
             wait_m4: WaitM4 {

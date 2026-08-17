@@ -442,15 +442,28 @@ impl<'a, Crypto: CryptoTrait> EdhocInitiator<Crypto> {
     pub fn new(mut crypto: Crypto, method: EDHOCMethod, selected_suite: EDHOCSuite) -> Self {
         trace!("Initializing EdhocInitiator");
         let suites_i = prepare_suites_i(&crypto.supported_suites(), selected_suite.into()).unwrap();
-        let (x, g_x) = crypto.p256_generate_key_pair();
+
+        // A post-quantum method needs an ephemeral KEM key pair instead of a DH one. The
+        // method is known here, unlike on the responder side where it only arrives in
+        // message_1, so the right pair can be generated up front.
+        #[cfg(feature = "pq")]
+        let state = if method.pq_modes().is_some() {
+            let (sk, pk) = crypto
+                .kem_generate_key_pair()
+                .expect("the backend advertised a post-quantum suite");
+            InitiatorStart::new_pq(suites_i, method, KemEphemeral { sk, pk })
+        } else {
+            let (x, g_x) = crypto.p256_generate_key_pair();
+            InitiatorStart::new_dh(suites_i, method, x, g_x)
+        };
+        #[cfg(not(feature = "pq"))]
+        let state = {
+            let (x, g_x) = crypto.p256_generate_key_pair();
+            InitiatorStart::new_dh(suites_i, method, x, g_x)
+        };
 
         EdhocInitiator {
-            state: InitiatorStart {
-                x,
-                g_x,
-                method: method.into(),
-                suites_i,
-            },
+            state,
             i: None,
             cred_i: None,
             crypto,
@@ -1537,6 +1550,59 @@ mod test {
         };
         assert_eq!(both.mode(), PqAuthMode::KemSign);
         assert!(both.kem_dk().is_some() && both.dsa_sk().is_some());
+    }
+
+    /// The public API up to the point the ephemeral KEM reaches: the Initiator generates an
+    /// ML-KEM ephemeral pair instead of a DH one and sends `kem.pk_eph`, and the Responder
+    /// encapsulates to it while processing message_1.
+    ///
+    /// `prepare_message_2` still fails, because the per-mode authentication module does not
+    /// exist yet; asserted here so that the boundary is explicit rather than accidental.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_ephemeral_reaches_the_responder() {
+        use lakers_shared::{EDHOCSuite, ML_KEM_ENCAPS_KEY_LEN};
+
+        let cred_r = Credential::parse_ccs(CRED_R.try_into().unwrap()).unwrap();
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let (_initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+
+        // METHOD 40 needs the one-byte-uint form, then SUITES_I 60, then an 800-byte bstr.
+        assert_eq!(
+            &message_1.as_slice()[..6],
+            &[0x18, 40, 0x18, 60, 0x59, 0x03]
+        );
+        assert_eq!(
+            message_1.as_slice()[6],
+            (ML_KEM_ENCAPS_KEY_LEN & 0xff) as u8
+        );
+
+        let responder = EdhocResponder::new(
+            default_crypto(),
+            ResponderIdentity::Pq(PqIdentity::KemSign {
+                kem_dk: [0u8; ML_KEM_DECAPS_KEY_LEN],
+                dsa_sk: [0u8; ML_DSA_SIGN_KEY_LEN],
+            }),
+            cred_r,
+        );
+        let (responder, _c_i, _ead_1) = responder
+            .process_message_1(&message_1)
+            .expect("the responder encapsulates to kem.pk_eph here");
+
+        assert_eq!(
+            responder
+                .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+                .map(|_| ())
+                .unwrap_err(),
+            EDHOCError::UnsupportedMethod,
+            "authentication is not wired up yet"
+        );
     }
 
     /// The rustcrypto backend advertises the provisional post-quantum suite once `pq` is on,

@@ -127,11 +127,68 @@ pub fn edhoc_key_update(
     state.prk_out
 }
 
+/// The Responder half of the ephemeral KEM: encapsulate to the Initiator's `kem.pk_eph` and
+/// keep both halves of the result.
+///
+/// There is no ephemeral key generation here. With Diffie-Hellman both peers generate a pair;
+/// with a KEM only the Initiator does, and the Responder answers with a ciphertext. The
+/// `y`/`g_y` in `ResponderStart` are generated eagerly at construction, before the method is
+/// known, and simply go unused on this path.
+#[cfg(feature = "pq")]
+fn r_process_message_1_pq(
+    state: &ResponderStart,
+    crypto: &mut impl CryptoTrait,
+    message_1: &BufferMessage1,
+    method: EDHOCMethod,
+) -> Result<(ProcessingM1, ConnId, EadItems), EDHOCError> {
+    let (_method, suites_i, pk_eph, c_i, ead_1) =
+        parse_message_1_sized::<ML_KEM_ENCAPS_KEY_LEN>(message_1)?;
+
+    if !crypto
+        .supported_suites()
+        .contains(&suites_i[suites_i.len() - 1])
+    {
+        return Err(EDHOCError::UnsupportedCipherSuite);
+    }
+
+    let h_message_1 = crypto.sha256_digest(message_1.as_slice());
+    let (ss_eph, ct_eph) = crypto.kem_encapsulate(&pk_eph)?;
+
+    Ok((
+        ProcessingM1 {
+            method,
+            y: state.y,
+            g_y: state.g_y,
+            c_i,
+            g_x: [0x00; P256_ELEM_LEN],
+            h_message_1,
+            kem_eph: Some(KemEphemeralEncapsulation { ss_eph, ct_eph }),
+        },
+        c_i,
+        ead_1,
+    ))
+}
+
 pub fn r_process_message_1(
     state: &ResponderStart,
     crypto: &mut impl CryptoTrait,
     message_1: &BufferMessage1,
 ) -> Result<(ProcessingM1, ConnId, EadItems), EDHOCError> {
+    // METHOD comes first, and the width of the ephemeral element that follows depends on it,
+    // so it has to be read before the message can be parsed. Unlike the Initiator with
+    // message_2, the Responder cannot be told the width in advance.
+    #[cfg(feature = "pq")]
+    {
+        let mut probe = CBORDecoder::new(message_1.as_slice());
+        if let Ok(raw) = probe.u8() {
+            if let Ok(method) = EDHOCMethod::try_from(raw) {
+                if method.pq_modes().is_some() {
+                    return r_process_message_1_pq(state, crypto, message_1, method);
+                }
+            }
+        }
+    }
+
     // Step 1: decode message_1
     // g_x will be saved to the state
     if let Ok((method, suites_i, g_x, c_i, ead_1)) = parse_message_1(message_1) {
@@ -158,12 +215,14 @@ pub fn r_process_message_1(
                     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
                     Ok((
                         ProcessingM1 {
-                            method: method,
+                            method,
                             y: state.y,
                             g_y: state.g_y,
                             c_i,
                             g_x,
                             h_message_1,
+                            #[cfg(feature = "pq")]
+                            kem_eph: None,
                         },
                         c_i,
                         ead_1,
@@ -188,7 +247,7 @@ pub fn r_prepare_message_2(
     c_r: ConnId,
     ead_2: &EadItems,
 ) -> Result<(WaitM3, BufferMessage2), EDHOCError> {
-    let th_2 = compute_th_2(crypto, &state.g_y, &state.h_message_1);
+    let th_2 = compute_th_2(crypto, &state.g_y[..], &state.h_message_1)?;
     let prk_2e = compute_prk_2e(crypto, &state.y, &state.g_x, &th_2);
 
     let prepared = match (state.method, method_details) {
@@ -388,7 +447,17 @@ pub fn i_prepare_message_1(
     ead_1: &EadItems,
 ) -> Result<(WaitM2, BufferMessage1), EDHOCError> {
     // Encode message_1 as a sequence of CBOR encoded data items as specified in Section 5.2.1
-    let message_1 = encode_message_1(state.method, &state.suites_i, &state.g_x[..], c_i, &ead_1)?;
+    // The ephemeral element is `G_X` classically and `kem.pk_eph` for the post-quantum
+    // methods; `encode_message_1` sizes its own bstr header either way.
+    #[cfg(feature = "pq")]
+    let eph_pk: &[u8] = match &state.kem_eph {
+        Some(kem_eph) => &kem_eph.pk[..],
+        None => &state.g_x[..],
+    };
+    #[cfg(not(feature = "pq"))]
+    let eph_pk: &[u8] = &state.g_x[..];
+
+    let message_1 = encode_message_1(state.method, &state.suites_i, eph_pk, c_i, &ead_1)?;
 
     // hash message_1 here to avoid saving the whole message in the state
     let h_message_1 = crypto.sha256_digest(message_1.as_slice());
@@ -398,6 +467,8 @@ pub fn i_prepare_message_1(
             method: state.method,
             x: state.x,
             h_message_1,
+            #[cfg(feature = "pq")]
+            kem_sk_eph: state.kem_eph.map(|kem_eph| kem_eph.sk),
         },
         message_1,
     ))
@@ -409,7 +480,7 @@ pub fn i_parse_message_2<'a>(
     message_2: &BufferMessage2,
 ) -> Result<(ProcessingM2, ConnId, ParsedMessage2Details, EadItems), EDHOCError> {
     let (g_y, ciphertext_2) = parse_message_2(message_2)?;
-    let th_2 = compute_th_2(crypto, &g_y, &state.h_message_1);
+    let th_2 = compute_th_2(crypto, &g_y[..], &state.h_message_1)?;
     let prk_2e = compute_prk_2e(crypto, &state.x, &g_y, &th_2);
     let plaintext_2 = encrypt_decrypt_ciphertext_2(crypto, &prk_2e, &th_2, &ciphertext_2);
 
@@ -574,7 +645,23 @@ fn encode_message_1(
 ) -> Result<BufferMessage1, EDHOCError> {
     let mut output = BufferMessage1::new();
 
-    output.push(method.into()).unwrap(); // CBOR unsigned int less than 24 is encoded verbatim
+    // METHOD is a CBOR unsigned int. Values up to 23 encode verbatim; from 24 up they need the
+    // one-byte-uint header, and emitting the value bare would be read back as a *negative*
+    // integer (0x28 is -9, not 40). Reachable by any method >= 24, which is where the
+    // Specification Required range of the registry starts.
+    let method_value: u8 = method.into();
+    if method_value < CBOR_UINT_1BYTE {
+        output
+            .push(method_value)
+            .map_err(|_| EDHOCError::EncodingError)?;
+    } else {
+        output
+            .push(CBOR_UINT_1BYTE)
+            .map_err(|_| EDHOCError::EncodingError)?;
+        output
+            .push(method_value)
+            .map_err(|_| EDHOCError::EncodingError)?;
+    }
 
     // A CBOR unsigned int is encoded verbatim only up to 23; 24 (`CBOR_UINT_1BYTE`) is itself
     // the "one length byte follows" header. The comparison used to be `<=`, which encoded
@@ -635,23 +722,27 @@ fn encode_message_2(
     Ok(output)
 }
 
+/// `TH_2 = H(bstr(eph), bstr(H(message_1)))`, where `eph` is `G_Y` classically and
+/// `kem.ct_eph` for the post-quantum methods.
+///
+/// Streamed rather than assembled on the stack: a 768-byte `kem.ct_eph` would need a buffer
+/// 24x the size of the classical one, and its bstr header is two bytes rather than one.
+/// Output is unchanged for a 32-byte element, which encodes as 0x58 0x20 either way.
 fn compute_th_2(
     crypto: &mut impl CryptoTrait,
-    g_y: &BytesP256ElemLen,
+    eph: &[u8],
     h_message_1: &BytesHashLen,
-) -> BytesHashLen {
-    // Whether this makes sense to build as a whole on the stack and then hash or feed into a
-    // hasher is probably a stack-size-vs-flash-size trade-off, which has yet to be evaluated.
-    let mut message = [0x00; 4 + P256_ELEM_LEN + SHA256_DIGEST_LEN];
-    message[0] = CBOR_BYTE_STRING;
-    message[1] = P256_ELEM_LEN as u8;
-    message[2..2 + P256_ELEM_LEN].copy_from_slice(g_y);
-    message[2 + P256_ELEM_LEN] = CBOR_BYTE_STRING;
-    message[3 + P256_ELEM_LEN] = SHA256_DIGEST_LEN as u8;
-    message[4 + P256_ELEM_LEN..4 + P256_ELEM_LEN + SHA256_DIGEST_LEN]
-        .copy_from_slice(&h_message_1[..]);
+) -> Result<BytesHashLen, EDHOCError> {
+    let mut header = EdhocBuffer::<3>::new();
+    encode_bstr_header(&mut header, eph.len())?;
 
-    crypto.sha256_digest(message.as_slice())
+    let mut hash = crypto.sha256_start();
+    hash.update(header.as_slice());
+    hash.update(eph);
+    hash.update([CBOR_BYTE_STRING, SHA256_DIGEST_LEN as u8]);
+    hash.update(h_message_1);
+
+    Ok(hash.finalize().into())
 }
 
 fn compute_th_3(
@@ -1300,6 +1391,19 @@ fn compute_prk_3e2m(
     crypto.hkdf_extract(salt_3e2m, &g_rx)
 }
 
+/// `PRK_2e = EDHOC_Extract(TH_2, ss_eph)`.
+///
+/// The KEM shared secret is 32 bytes, the same width as a P-256 element, so `hkdf_extract`
+/// is reused unchanged -- see the assertion next to `ML_KEM_SHARED_SECRET_LEN`.
+#[cfg(feature = "pq")]
+fn compute_prk_2e_pq(
+    crypto: &mut impl CryptoTrait,
+    ss_eph: &BytesKemSharedSecret,
+    th_2: &BytesHashLen,
+) -> BytesHashLen {
+    crypto.hkdf_extract(th_2, ss_eph)
+}
+
 fn compute_prk_2e(
     crypto: &mut impl CryptoTrait,
     x: &BytesP256ElemLen,
@@ -1782,13 +1886,13 @@ mod tests {
     #[test]
     fn test_compute_th_2() {
         let th_2 = compute_th_2(&mut default_crypto(), &G_Y_TV, &H_MESSAGE_1_TV);
-        assert_eq!(th_2, TH_2_TV);
+        assert_eq!(th_2.unwrap(), TH_2_TV);
     }
 
     #[test]
     fn test_compute_th_2_psk() {
         let th_2 = compute_th_2(&mut default_crypto(), &G_Y_PSK_TV, &H_MESSAGE_1_PSK_TV);
-        assert_eq!(th_2, TH_2_PSK_TV);
+        assert_eq!(th_2.unwrap(), TH_2_PSK_TV);
     }
 
     #[test]
@@ -2027,6 +2131,70 @@ mod tests {
         )
         .unwrap();
         assert_eq!(roundtrip, plaintext_3);
+    }
+
+    /// The ephemeral KEM, end to end at the message-framing level: the Initiator generates a
+    /// key pair and sends `kem.pk_eph`; the Responder encapsulates to it and returns
+    /// `kem.ct_eph`; both sides arrive at the same `TH_2` and `PRK_2e`.
+    ///
+    /// No static authentication is involved -- that is what `edhoc/pq.rs` will add. This is
+    /// the KEM analogue of the ephemeral half of an RFC 9528 handshake, and the point where
+    /// `ss_eph` replaces `G_XY`.
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_ephemeral_kem_key_agreement() {
+        if MAX_MESSAGE_SIZE_LEN < ML_KEM_ENCAPS_KEY_LEN + 64 {
+            return;
+        }
+        let mut crypto = default_crypto();
+
+        // --- Initiator: generate the ephemeral pair, send kem.pk_eph in message_1
+        let (sk_eph, pk_eph) = crypto.kem_generate_key_pair().unwrap();
+        let suites =
+            EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[EDHOCSuite::PqCipherSuite as u8])
+                .unwrap();
+        let message_1 = encode_message_1(
+            EDHOCMethod::PqSigKemsig,
+            &suites,
+            &pk_eph[..],
+            C_I_TV,
+            &EadItems::new(),
+        )
+        .unwrap();
+
+        // --- Responder: encapsulate, derive TH_2 and PRK_2e
+        let (_m, _s, pk_rx, _c, _e) =
+            parse_message_1_sized::<ML_KEM_ENCAPS_KEY_LEN>(&message_1).unwrap();
+        assert_eq!(pk_rx, pk_eph);
+
+        let h_message_1 = crypto.sha256_digest(message_1.as_slice());
+        let (ss_r, ct_eph) = crypto.kem_encapsulate(&pk_rx).unwrap();
+        let th_2_r = compute_th_2(&mut crypto, &ct_eph[..], &h_message_1).unwrap();
+        let prk_2e_r = compute_prk_2e_pq(&mut crypto, &ss_r, &th_2_r);
+
+        // --- message_2 carries kem.ct_eph where G_Y used to be
+        let ciphertext_2 = BufferCiphertext2::new_from_slice(&[0xcd; 16]).unwrap();
+        let message_2 = encode_message_2(&ct_eph[..], &ciphertext_2).unwrap();
+        let (ct_rx, c2_rx) = parse_message_2_sized::<ML_KEM_CIPHERTEXT_LEN>(&message_2).unwrap();
+        assert_eq!(ct_rx, ct_eph);
+        assert_eq!(c2_rx, ciphertext_2);
+
+        // --- Initiator: decapsulate and arrive at the same secrets
+        let ss_i = crypto.kem_decapsulate(&sk_eph, &ct_rx).unwrap();
+        let th_2_i = compute_th_2(&mut crypto, &ct_rx[..], &h_message_1).unwrap();
+        let prk_2e_i = compute_prk_2e_pq(&mut crypto, &ss_i, &th_2_i);
+
+        assert_eq!(ss_i, ss_r, "ephemeral shared secret must agree");
+        assert_eq!(th_2_i, th_2_r, "TH_2 must agree");
+        assert_eq!(prk_2e_i, prk_2e_r, "PRK_2e must agree");
+
+        // A different ephemeral key must not reach the same secret. ML-KEM decapsulation
+        // succeeds on any well-formed ciphertext (implicit rejection), so the failure shows up
+        // as a different PRK_2e rather than an error -- exactly the property D12 is about.
+        let (other_sk, _) = crypto.kem_generate_key_pair().unwrap();
+        let ss_wrong = crypto.kem_decapsulate(&other_sk, &ct_rx).unwrap();
+        assert_ne!(ss_wrong, ss_r);
+        assert_ne!(compute_prk_2e_pq(&mut crypto, &ss_wrong, &th_2_i), prk_2e_r);
     }
 
     /// The ephemeral wire element is a fixed 32 bytes classically but 800 (message_1) and 768

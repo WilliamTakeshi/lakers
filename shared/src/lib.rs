@@ -672,6 +672,68 @@ pub struct InitiatorStart {
     pub method: EDHOCMethod,
     pub x: BytesP256ElemLen,   // ephemeral private key of myself
     pub g_x: BytesP256ElemLen, // ephemeral public key of myself
+    /// The ephemeral KEM key pair, for the post-quantum methods. `x`/`g_x` are unused then.
+    #[cfg(feature = "pq")]
+    pub kem_eph: Option<KemEphemeral>,
+}
+
+impl InitiatorStart {
+    /// Construct with an ephemeral Diffie-Hellman key pair, for the classical methods.
+    ///
+    /// Prefer this over a struct literal: it keeps callers, including the binding crates,
+    /// working when a feature adds a field.
+    pub fn new_dh(
+        suites_i: EdhocBuffer<MAX_SUITES_LEN>,
+        method: EDHOCMethod,
+        x: BytesP256ElemLen,
+        g_x: BytesP256ElemLen,
+    ) -> Self {
+        Self {
+            suites_i,
+            method,
+            x,
+            g_x,
+            #[cfg(feature = "pq")]
+            kem_eph: None,
+        }
+    }
+
+    /// Construct with an ephemeral KEM key pair, for the post-quantum methods.
+    #[cfg(feature = "pq")]
+    pub fn new_pq(
+        suites_i: EdhocBuffer<MAX_SUITES_LEN>,
+        method: EDHOCMethod,
+        kem_eph: KemEphemeral,
+    ) -> Self {
+        Self {
+            suites_i,
+            method,
+            x: [0; P256_ELEM_LEN],
+            g_x: [0; P256_ELEM_LEN],
+            kem_eph: Some(kem_eph),
+        }
+    }
+}
+
+/// An ephemeral ML-KEM key pair, held by the Initiator between message_1 and message_2.
+///
+/// The Responder has no counterpart: with a KEM it encapsulates to the Initiator's key rather
+/// than generating an ephemeral pair of its own, which is the first place the DH symmetry of
+/// RFC 9528 breaks down.
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone, Copy)]
+pub struct KemEphemeral {
+    pub sk: BytesKemDecapsKey,
+    pub pk: BytesKemEncapsKey,
+}
+
+/// What the Responder derives from `kem.pk_eph` on receiving message_1: the shared secret it
+/// will feed into `PRK_2e`, and the ciphertext it must return in message_2.
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone, Copy)]
+pub struct KemEphemeralEncapsulation {
+    pub ss_eph: BytesKemSharedSecret,
+    pub ct_eph: BytesKemCiphertext,
 }
 
 #[derive(Debug)]
@@ -688,6 +750,10 @@ pub struct ProcessingM1 {
     pub c_i: ConnId,
     pub g_x: BytesP256ElemLen, // ephemeral public key of the initiator
     pub h_message_1: BytesHashLen,
+    /// Set for the post-quantum methods, where `y`/`g_y`/`g_x` are unused: the Responder has
+    /// already encapsulated to the Initiator's ephemeral key by this point.
+    #[cfg(feature = "pq")]
+    pub kem_eph: Option<KemEphemeralEncapsulation>,
 }
 
 #[derive(Clone, Debug)]
@@ -696,6 +762,23 @@ pub struct WaitM2 {
     pub method: EDHOCMethod,
     pub x: BytesP256ElemLen, // ephemeral private key of the initiator
     pub h_message_1: BytesHashLen,
+    /// The ephemeral KEM decapsulation key, needed to recover `ss_eph` from `kem.ct_eph` in
+    /// message_2. Set for the post-quantum methods.
+    #[cfg(feature = "pq")]
+    pub kem_sk_eph: Option<BytesKemDecapsKey>,
+}
+
+impl WaitM2 {
+    /// Prefer this over a struct literal; see [`InitiatorStart::new_dh`].
+    pub fn new_dh(method: EDHOCMethod, x: BytesP256ElemLen, h_message_1: BytesHashLen) -> Self {
+        Self {
+            method,
+            x,
+            h_message_1,
+            #[cfg(feature = "pq")]
+            kem_sk_eph: None,
+        }
+    }
 }
 #[derive(Debug)]
 pub enum WaitM3MethodSpecifics {
