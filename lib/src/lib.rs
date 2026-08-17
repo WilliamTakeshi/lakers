@@ -107,18 +107,89 @@ pub struct EdhocResponderDone<Crypto: CryptoTrait> {
     crypto: Crypto,
 }
 
+/// The post-quantum private keys of one role.
+///
+/// Which keys are present *is* the [`PqAuthMode`], exactly as it is for the public side in
+/// [`CredentialKey`]: there is no separate mode field to disagree with the key material, so a
+/// "signs but holds no signing key" identity cannot be constructed.
+///
+/// Note the size: an ML-KEM-512 decapsulation key is 1632 bytes and an ML-DSA-44 signing key
+/// 2560, so the `KemSign` case is a ~4.2 kB value that the typestate chain moves around.
+/// Acceptable for a host-side prototype, not for the embedded targets.
+#[cfg(feature = "pq")]
+#[derive(Debug)]
+pub enum PqIdentity {
+    Kem {
+        kem_dk: BytesKemDecapsKey,
+    },
+    Sign {
+        dsa_sk: BytesPqSignKey,
+    },
+    KemSign {
+        kem_dk: BytesKemDecapsKey,
+        dsa_sk: BytesPqSignKey,
+    },
+}
+
+#[cfg(feature = "pq")]
+impl PqIdentity {
+    pub fn mode(&self) -> PqAuthMode {
+        match self {
+            PqIdentity::Kem { .. } => PqAuthMode::Kem,
+            PqIdentity::Sign { .. } => PqAuthMode::Sign,
+            PqIdentity::KemSign { .. } => PqAuthMode::KemSign,
+        }
+    }
+
+    pub fn kem_dk(&self) -> Option<&BytesKemDecapsKey> {
+        match self {
+            PqIdentity::Kem { kem_dk } | PqIdentity::KemSign { kem_dk, .. } => Some(kem_dk),
+            PqIdentity::Sign { .. } => None,
+        }
+    }
+
+    pub fn dsa_sk(&self) -> Option<&BytesPqSignKey> {
+        match self {
+            PqIdentity::Sign { dsa_sk } | PqIdentity::KemSign { dsa_sk, .. } => Some(dsa_sk),
+            PqIdentity::Kem { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ResponderIdentity {
-    Signature { r: BytesP256ElemLen },
-    StaticDh { r: BytesP256ElemLen },
+    Signature {
+        r: BytesP256ElemLen,
+    },
+    StaticDh {
+        r: BytesP256ElemLen,
+    },
     Psk,
+    #[cfg(feature = "pq")]
+    Pq(PqIdentity),
 }
 
 #[derive(Debug)]
 pub enum InitiatorIdentity {
-    Signature { i: BytesP256ElemLen },
-    StaticDh { i: BytesP256ElemLen },
+    Signature {
+        i: BytesP256ElemLen,
+    },
+    StaticDh {
+        i: BytesP256ElemLen,
+    },
     Psk,
+    #[cfg(feature = "pq")]
+    Pq(PqIdentity),
+}
+
+#[cfg(feature = "pq")]
+impl InitiatorIdentity {
+    fn pq_mode(&self) -> Option<PqAuthMode> {
+        match self {
+            InitiatorIdentity::Pq(identity) => Some(identity.mode()),
+            _ => None,
+        }
+    }
 }
 
 /// Rejects an identity whose authentication method disagrees with the EDHOC method
@@ -127,12 +198,62 @@ fn check_initiator_identity(
     method: EDHOCMethod,
     identity: &InitiatorIdentity,
 ) -> Result<(), EDHOCError> {
+    // A post-quantum method fixes each role's mode, so the check is that the identity supplies
+    // exactly the key material that mode needs. Handled before the classical table so that a
+    // PQ method paired with a classical identity, or the reverse, falls through to the error.
+    #[cfg(feature = "pq")]
+    if let Some((initiator_mode, _)) = method.pq_modes() {
+        return match identity.pq_mode() {
+            Some(mode) if mode == initiator_mode => Ok(()),
+            _ => Err(EDHOCError::MissingIdentity),
+        };
+    }
+
     match (method, identity) {
         (EDHOCMethod::SigSig | EDHOCMethod::SigStat, InitiatorIdentity::Signature { .. })
         | (EDHOCMethod::StatSig | EDHOCMethod::StatStat, InitiatorIdentity::StaticDh { .. })
         | (EDHOCMethod::PSK, InitiatorIdentity::Psk) => Ok(()),
         // FIXME: Distinguish `MissingIdentity` from `MethodIdentityMismatch` here;
         _ => Err(EDHOCError::MissingIdentity),
+    }
+}
+
+/// The responder-side counterpart of [`check_initiator_identity`]: rejects an identity whose
+/// authentication method disagrees with the method announced in message_1, and on success
+/// produces the per-method details `r_prepare_message_2` needs.
+///
+/// This was inline in `prepare_message_2`; it is a function so the two role checks sit side by
+/// side and can be tested without driving a handshake.
+fn check_responder_identity<'a>(
+    method: EDHOCMethod,
+    identity: &'a ResponderIdentity,
+    cred_transfer: CredentialTransfer,
+) -> Result<PrepareMessage2Details<'a>, EDHOCError> {
+    #[cfg(feature = "pq")]
+    if let Some((_, responder_mode)) = method.pq_modes() {
+        return match identity {
+            ResponderIdentity::Pq(pq) if pq.mode() == responder_mode => {
+                Ok(PrepareMessage2Details::Pq {
+                    mode: responder_mode,
+                    kem_dk: pq.kem_dk(),
+                    dsa_sk: pq.dsa_sk(),
+                    cred_transfer,
+                })
+            }
+            _ => Err(EDHOCError::MissingIdentity),
+        };
+    }
+
+    match (method, identity) {
+        (EDHOCMethod::SigStat | EDHOCMethod::StatStat, ResponderIdentity::StaticDh { r }) => {
+            Ok(PrepareMessage2Details::StaticDh { r, cred_transfer })
+        }
+        (EDHOCMethod::SigSig | EDHOCMethod::StatSig, ResponderIdentity::Signature { r }) => {
+            Ok(PrepareMessage2Details::Signature { r, cred_transfer })
+        }
+        (EDHOCMethod::PSK, ResponderIdentity::Psk) => Ok(PrepareMessage2Details::Psk {}),
+        // FIXME: Distinguish `MissingIdentity` from `MethodIdentityMismatch` here;
+        _ => Err(EDHOCError::MissingIdentity), // or UnsupportedMethod
     }
 }
 
@@ -182,17 +303,7 @@ impl<Crypto: CryptoTrait> EdhocResponderProcessedM1<Crypto> {
             None => generate_connection_identifier_cbor(&mut self.crypto),
         };
 
-        let method_details = match (self.state.method, &self.r) {
-            (EDHOCMethod::SigStat | EDHOCMethod::StatStat, ResponderIdentity::StaticDh { r }) => {
-                PrepareMessage2Details::StaticDh { r, cred_transfer }
-            }
-            (EDHOCMethod::SigSig | EDHOCMethod::StatSig, ResponderIdentity::Signature { r }) => {
-                PrepareMessage2Details::Signature { r, cred_transfer }
-            }
-            (EDHOCMethod::PSK, ResponderIdentity::Psk) => PrepareMessage2Details::Psk {},
-            // FIXME: Distinguish `MissingIdentity` from `MethodIdentityMismatch` here;
-            _ => return Err(EDHOCError::MissingIdentity), // or UnsupportedMethod
-        };
+        let method_details = check_responder_identity(self.state.method, &self.r, cred_transfer)?;
 
         match r_prepare_message_2(
             &self.state,
@@ -1327,6 +1438,105 @@ mod test {
         let empty_message_3 = BufferMessage3::new();
         let err = responder.parse_message_3(&empty_message_3).unwrap_err();
         assert_eq!(err, EDHOCError::ParsingError);
+    }
+
+    /// Both roles' method/identity agreement checks must accept exactly the mode the method
+    /// names for that role, and reject every other pairing -- including a PQ method with a
+    /// classical identity and the reverse.
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_pq_identity_must_match_the_method() {
+        use lakers_shared::PqAuthMode;
+
+        fn identity(mode: PqAuthMode) -> PqIdentity {
+            match mode {
+                PqAuthMode::Kem => PqIdentity::Kem {
+                    kem_dk: [0u8; ML_KEM_DECAPS_KEY_LEN],
+                },
+                PqAuthMode::Sign => PqIdentity::Sign {
+                    dsa_sk: [0u8; ML_DSA_SIGN_KEY_LEN],
+                },
+                PqAuthMode::KemSign => PqIdentity::KemSign {
+                    kem_dk: [0u8; ML_KEM_DECAPS_KEY_LEN],
+                    dsa_sk: [0u8; ML_DSA_SIGN_KEY_LEN],
+                },
+            }
+        }
+
+        let methods = [
+            EDHOCMethod::PqSigKemsig,
+            EDHOCMethod::PqKemsigSig,
+            EDHOCMethod::PqKemsigKem,
+            EDHOCMethod::PqKemsigKemsig,
+        ];
+        let modes = [PqAuthMode::Sign, PqAuthMode::Kem, PqAuthMode::KemSign];
+
+        for method in methods {
+            let (want_i, want_r) = method.pq_modes().unwrap();
+            for mode in modes {
+                let i_ok = check_initiator_identity(method, &InitiatorIdentity::Pq(identity(mode)))
+                    .is_ok();
+                assert_eq!(i_ok, mode == want_i, "initiator {method:?} / {mode:?}");
+
+                let r_ok = check_responder_identity(
+                    method,
+                    &ResponderIdentity::Pq(identity(mode)),
+                    CredentialTransfer::ByReference,
+                )
+                .is_ok();
+                assert_eq!(r_ok, mode == want_r, "responder {method:?} / {mode:?}");
+            }
+
+            // A PQ method with a classical identity.
+            assert!(check_initiator_identity(method, &InitiatorIdentity::Psk).is_err());
+            assert!(check_responder_identity(
+                method,
+                &ResponderIdentity::Psk,
+                CredentialTransfer::ByReference
+            )
+            .is_err());
+        }
+
+        // A classical method with a PQ identity.
+        for method in [EDHOCMethod::SigSig, EDHOCMethod::StatStat, EDHOCMethod::PSK] {
+            assert!(check_initiator_identity(
+                method,
+                &InitiatorIdentity::Pq(identity(PqAuthMode::KemSign))
+            )
+            .is_err());
+            assert!(check_responder_identity(
+                method,
+                &ResponderIdentity::Pq(identity(PqAuthMode::KemSign)),
+                CredentialTransfer::ByReference
+            )
+            .is_err());
+        }
+    }
+
+    /// Which keys a `PqIdentity` holds is its mode; there is no separate field to disagree.
+    #[cfg(feature = "pq")]
+    #[test]
+    fn test_pq_identity_mode_follows_its_keys() {
+        use lakers_shared::PqAuthMode;
+
+        let kem = PqIdentity::Kem {
+            kem_dk: [1u8; ML_KEM_DECAPS_KEY_LEN],
+        };
+        assert_eq!(kem.mode(), PqAuthMode::Kem);
+        assert!(kem.kem_dk().is_some() && kem.dsa_sk().is_none());
+
+        let sign = PqIdentity::Sign {
+            dsa_sk: [2u8; ML_DSA_SIGN_KEY_LEN],
+        };
+        assert_eq!(sign.mode(), PqAuthMode::Sign);
+        assert!(sign.kem_dk().is_none() && sign.dsa_sk().is_some());
+
+        let both = PqIdentity::KemSign {
+            kem_dk: [3u8; ML_KEM_DECAPS_KEY_LEN],
+            dsa_sk: [4u8; ML_DSA_SIGN_KEY_LEN],
+        };
+        assert_eq!(both.mode(), PqAuthMode::KemSign);
+        assert!(both.kem_dk().is_some() && both.dsa_sk().is_some());
     }
 
     /// The rustcrypto backend advertises the provisional post-quantum suite once `pq` is on,

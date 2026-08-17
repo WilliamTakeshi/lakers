@@ -723,6 +723,17 @@ pub enum PrepareMessage2Details<'a> {
         cred_transfer: CredentialTransfer,
     },
     Psk,
+    /// The keys are borrowed rather than copied: the pair is ~4.2 kB.
+    ///
+    /// `mode` is redundant with which keys are present, but is carried so the protocol code
+    /// does not have to re-derive it; both come from one [`PqAuthMode`]-checked source.
+    #[cfg(feature = "pq")]
+    Pq {
+        mode: PqAuthMode,
+        kem_dk: Option<&'a BytesKemDecapsKey>,
+        dsa_sk: Option<&'a BytesPqSignKey>,
+        cred_transfer: CredentialTransfer,
+    },
 }
 
 #[derive(Debug)]

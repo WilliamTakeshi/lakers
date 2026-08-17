@@ -482,6 +482,10 @@ pub fn i_verify_message_2(
         }
         // FIXME: it is not an error, but more a lack of agreement between peers.
         InitiatorIdentity::Psk => return Err(EDHOCError::MissingIdentity),
+        // The post-quantum protocol steps are not wired up yet; the identity plumbing lands
+        // first so the method/identity agreement checks can be built and tested against it.
+        #[cfg(feature = "pq")]
+        InitiatorIdentity::Pq(_) => return Err(EDHOCError::UnsupportedMethod),
     };
 
     Ok(ProcessedM2 {

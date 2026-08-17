@@ -54,6 +54,12 @@ impl PyEdhocResponder {
             // TODO: SigSig support for the Python bindings
             Ok(ResponderIdentity::Signature { .. }) => todo!(),
             Err(err) => Err(err),
+            // Catch-all rather than a `#[cfg(feature = "pq")]` arm: a `cfg` here would test
+            // *this* crate's features, but `lakers/pq` can be enabled without it, and feature
+            // unification would then leave this match non-exhaustive. The post-quantum
+            // identities land here, having no way to be expressed from Python yet.
+            #[allow(unreachable_patterns)]
+            Ok(_) => Err(EDHOCError::UnsupportedMethod),
         }
         .with_cause(py, "Failed to ingest CRED_R")?;
 
