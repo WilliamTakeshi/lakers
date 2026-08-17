@@ -32,5 +32,17 @@ log = ["dep:log"]
 large_buffers = [ "lakers-shared/large_buffers" ]
 pq_buffers = [ "lakers-shared/pq_buffers" ]
 
+## Post-quantum EDHOC, per draft-papon-lake-pq-edhoc.
+##
+## Experimental, and not interoperable: the draft assigns no method code points or
+## cipher suites, so everything behind this flag uses locally-chosen values.
+##
+## Selects `pq_buffers` separately -- this flag only turns the code on, it does not
+## make the messages fit. A PQ handshake needs both.
+##
+## lakers-crypto is a dev-dependency, so this reaches the backend for the test build
+## only; a downstream consumer picks its own backend and enables `pq` on it directly.
+pq = [ "lakers-shared/pq", "lakers-crypto/pq" ]
+
 [lib]
 crate-type = ["rlib"]

@@ -36,3 +36,11 @@ cryptocell310 = [ "lakers-crypto-cryptocell310" ]
 # lakers-crypto-rustcrypto on their own, and combine it with an entropy choice
 # of their avail.
 rustcrypto = [ "lakers-crypto-rustcrypto", "rand_core/getrandom" ]
+
+## Post-quantum primitives for draft-papon-lake-pq-edhoc.
+##
+## The `?` is load-bearing: lakers-crypto-rustcrypto is an optional dependency, so
+## a plain `lakers-crypto-rustcrypto/pq` would enable that backend as a side effect
+## of turning on `pq`, breaking the psa and cryptocell310 configurations. The weak
+## form forwards only when the backend is already selected.
+pq = [ "lakers-shared/pq", "lakers-crypto-rustcrypto?/pq" ]

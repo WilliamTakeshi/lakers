@@ -28,6 +28,16 @@ rstest = "0.21.0"
 default = [  ]
 python-bindings = ["pyo3", "hex"]
 
+## Post-quantum EDHOC, per draft-papon-lake-pq-edhoc.
+##
+## Gates the ML-KEM and ML-DSA additions to the `Crypto` trait, the PQ credential
+## and suite variants, and the PQ `EDHOCMethod` values. Experimental: the draft
+## assigns no method code points or cipher suites, so everything behind this flag
+## uses locally-chosen values and is not interoperable.
+##
+## Orthogonal to `pq_buffers`, which sizes the buffers. A PQ handshake needs both.
+pq = []
+
 ## For all arbitrarily limited buffers, pick the maximum.
 ##
 ## This provides an easy way to allow unconstrained systems to stomach larger
