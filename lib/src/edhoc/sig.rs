@@ -148,7 +148,12 @@ pub(crate) fn r_verify_message_3_sig(
             },
         );
 
-        Ok(VerifiedMessage3 { prk_4e3m, th_4 })
+        Ok(VerifiedMessage3 {
+            prk_4e3m,
+            th_4,
+            #[cfg(feature = "pq")]
+            pq_message_4: None,
+        })
     } else {
         Err(EDHOCError::MacVerificationFailed)
     }
@@ -283,5 +288,10 @@ pub(crate) fn i_prepare_message_3_sig(
         },
     );
 
-    Ok(PreparedMessage3 { message_3, th_4 })
+    Ok(PreparedMessage3 {
+        message_3,
+        th_4,
+        #[cfg(feature = "pq")]
+        pq_message_4: None,
+    })
 }

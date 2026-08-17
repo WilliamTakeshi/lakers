@@ -143,7 +143,12 @@ pub(crate) fn r_verify_message_3_psk(
             ead_3: &state.ead_3,
         },
     );
-    Ok(VerifiedMessage3 { prk_4e3m, th_4 })
+    Ok(VerifiedMessage3 {
+        prk_4e3m,
+        th_4,
+        #[cfg(feature = "pq")]
+        pq_message_4: None,
+    })
 }
 
 pub(crate) fn i_parse_message_2_psk(
@@ -246,7 +251,12 @@ pub(crate) fn i_prepare_message_3_psk(
             ead_3: ead_3,
         },
     );
-    Ok(PreparedMessage3 { message_3, th_4 })
+    Ok(PreparedMessage3 {
+        message_3,
+        th_4,
+        #[cfg(feature = "pq")]
+        pq_message_4: None,
+    })
 }
 
 /// Recover `CRED_I` directly from `ID_CRED_I` in PSK mode.

@@ -899,11 +899,14 @@ pub enum ProcessedM2MethodSpecifics {
     /// key; it has to ride in message_3 so the Responder can complete its own ladder.
     /// `dsa_sk` is kept for the same reason `Signature` keeps `i`: message_3 still has to be
     /// signed.
+    /// `kem_dk` is the Initiator's *own* static decapsulation key, carried so that message_4
+    /// can decapsulate `kem.ct_I`. Present exactly when `i_mode.uses_kem()`.
     #[cfg(feature = "pq")]
     Pq {
         i_mode: PqAuthMode,
         kem_ct_r: Option<BytesKemCiphertext>,
         dsa_sk: Option<BytesPqSignKey>,
+        kem_dk: Option<BytesKemDecapsKey>,
     },
 }
 
@@ -912,8 +915,34 @@ pub enum ProcessedM2MethodSpecifics {
 pub struct ProcessedM2 {
     pub method_specifics: ProcessedM2MethodSpecifics,
     pub prk_3e2m: BytesHashLen,
+    /// The most-derived PRK the Initiator has for authenticating message_3.
+    ///
+    /// For every classical method and for §3.2 this really is `PRK_4e3m`. For an Initiator
+    /// that authenticates by KEM it is `PRK_3e2m`, because `PRK_4e3m` needs `ss_I` from
+    /// message_4 -- and keying `MAC_3` with the most-derived PRK actually available is the
+    /// normalization rule this implementation follows throughout.
     pub prk_4e3m: BytesHashLen,
     pub th_3: BytesHashLen,
+}
+
+/// What the Initiator needs at message_4 to finish a deferred ladder.
+///
+/// Present exactly for the methods whose Initiator authenticates by KEM: `PRK_4e3m =
+/// Extract(SALT_4e3m, ss_I)` where `ss_I` comes from decapsulating message_4's `kem.ct_I`.
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone, Copy)]
+pub struct PqMessage4I {
+    pub salt_4e3m: BytesHashLen,
+    pub kem_dk: BytesKemDecapsKey,
+}
+
+/// The Responder's twin of [`PqMessage4I`]: it encapsulates rather than decapsulates, so it
+/// holds the Initiator's *public* KEM key, learned from `CRED_I` at message_3.
+#[cfg(feature = "pq")]
+#[derive(Debug, Clone, Copy)]
+pub struct PqMessage4R {
+    pub salt_4e3m: BytesHashLen,
+    pub kem_ek: BytesKemEncapsKey,
 }
 #[derive(Debug)]
 pub enum ProcessingM3MethodSpecifics {
@@ -980,6 +1009,9 @@ pub struct ProcessedM3 {
     pub prk_exporter: BytesHashLen,
     #[cfg(feature = "pq")]
     pub prk_out_timing: PrkOutTiming,
+    /// Set exactly when `prk_out_timing` is `AtMessage4`.
+    #[cfg(feature = "pq")]
+    pub pq_message_4: Option<PqMessage4R>,
 }
 
 #[derive(Debug)]
@@ -991,6 +1023,9 @@ pub struct WaitM4 {
     pub prk_exporter: BytesHashLen,
     #[cfg(feature = "pq")]
     pub prk_out_timing: PrkOutTiming,
+    /// Set exactly when `prk_out_timing` is `AtMessage4`.
+    #[cfg(feature = "pq")]
+    pub pq_message_4: Option<PqMessage4I>,
 }
 
 impl WaitM4 {
@@ -1012,6 +1047,8 @@ impl WaitM4 {
             prk_exporter,
             #[cfg(feature = "pq")]
             prk_out_timing: PrkOutTiming::AtMessage3,
+            #[cfg(feature = "pq")]
+            pq_message_4: None,
         }
     }
 }

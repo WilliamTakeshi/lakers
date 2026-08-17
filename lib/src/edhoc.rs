@@ -70,11 +70,18 @@ struct VerifiedPeerMessage2 {
 struct PreparedMessage3 {
     message_3: BufferMessage3,
     th_4: BytesHashLen,
+    /// What message_4 will need to finish the ladder, for an Initiator that authenticates by
+    /// KEM. `None` for every other method, which is also what makes `PRK_out` derivable here.
+    #[cfg(feature = "pq")]
+    pq_message_4: Option<PqMessage4I>,
 }
 #[derive(Debug)]
 struct VerifiedMessage3 {
     prk_4e3m: BytesHashLen,
     th_4: BytesHashLen,
+    /// The Responder's twin of [`PreparedMessage3::pq_message_4`].
+    #[cfg(feature = "pq")]
+    pq_message_4: Option<PqMessage4R>,
 }
 
 #[derive(Debug)]
@@ -486,6 +493,8 @@ pub fn r_verify_message_3(
             prk_exporter,
             #[cfg(feature = "pq")]
             prk_out_timing: timing,
+            #[cfg(feature = "pq")]
+            pq_message_4: verified.pq_message_4,
         },
         match timing {
             PrkOutTiming::AtMessage3 => Some(prk_out),
@@ -537,6 +546,21 @@ pub fn r_prepare_message_4(
     crypto: &mut impl CryptoTrait,
     ead_4: &EadItems,
 ) -> Result<(Completed, BufferMessage4), EDHOCError> {
+    // A deferred ladder finishes here: message_4 carries kem.ct_I, and PRK_4e3m -- and so
+    // PRK_out -- only exist once it has been sent.
+    #[cfg(feature = "pq")]
+    if let Some(pq) = &state.pq_message_4 {
+        let (prk_4e3m, message_4) = pq::r_prepare_message_4_pq(state, crypto, pq, ead_4)?;
+        let (prk_out, prk_exporter) = derive_prk_out(crypto, &prk_4e3m, &state.th_4);
+        return Ok((
+            Completed {
+                prk_out,
+                prk_exporter,
+            },
+            message_4,
+        ));
+    }
+
     // compute ciphertext_4
     let plaintext_4 = encode_plaintext_4(&ead_4)?;
     let message_4 =
@@ -720,19 +744,17 @@ pub fn i_verify_message_2(
         InitiatorIdentity::Psk => return Err(EDHOCError::MissingIdentity),
         #[cfg(feature = "pq")]
         InitiatorIdentity::Pq(identity) => {
-            // §3.2's Initiator signs, so PRK_4e3m == PRK_3e2m, exactly as in RFC 9528's
-            // signature methods. When the Initiator uses a KEM instead, ss_I only arrives in
-            // message_4, so PRK_4e3m cannot be derived here at all -- that is the deferred
-            // prk_out work, and those modes are rejected until it lands.
-            if identity.mode().uses_kem() {
-                return Err(EDHOCError::UnsupportedMethod);
-            }
+            // PRK_3e2m either way, but for two different reasons. §3.2's Initiator signs, so
+            // PRK_4e3m *equals* PRK_3e2m exactly as in RFC 9528's signature methods. An
+            // Initiator that uses a KEM has no PRK_4e3m at all until message_4 delivers ss_I,
+            // and PRK_3e2m is simply the most-derived PRK it has for keying MAC_3.
             (
                 prk_3e2m,
                 ProcessedM2MethodSpecifics::Pq {
                     i_mode: identity.mode(),
                     kem_ct_r,
                     dsa_sk: identity.dsa_sk().copied(),
+                    kem_dk: identity.kem_dk().copied(),
                 },
             )
         }
@@ -788,6 +810,8 @@ pub fn i_prepare_message_3(
             prk_exporter,
             #[cfg(feature = "pq")]
             prk_out_timing: timing,
+            #[cfg(feature = "pq")]
+            pq_message_4: prepared.pq_message_4,
         },
         prepared.message_3,
         match timing {
@@ -802,6 +826,19 @@ pub fn i_process_message_4(
     crypto: &mut impl CryptoTrait,
     message_4: &BufferMessage4,
 ) -> Result<(Completed, EadItems), EDHOCError> {
+    #[cfg(feature = "pq")]
+    if let Some(pq) = &state.pq_message_4 {
+        let (prk_4e3m, ead_4) = pq::i_process_message_4_pq(state, crypto, pq, message_4)?;
+        let (prk_out, prk_exporter) = derive_prk_out(crypto, &prk_4e3m, &state.th_4);
+        return Ok((
+            Completed {
+                prk_out,
+                prk_exporter,
+            },
+            ead_4,
+        ));
+    }
+
     let plaintext_4 =
         decrypt_message_4::<CcmTagLen8>(crypto, &state.prk_4e3m, &state.th_4, &message_4)?;
     let decoded_p4_res = decode_plaintext_4(&plaintext_4);
@@ -1319,47 +1356,86 @@ pub(crate) fn encrypt_message_3_pq(
     let ciphertext_part =
         encrypt_message_3::<CcmTagLen16>(crypto, prk_3e2m, th_3, plaintext_3, None)?;
 
-    let Some(kem_ct_r) = kem_ct_r else {
-        return Ok(ciphertext_part);
-    };
-
-    let mut output = BufferMessage3::new();
-    encode_bstr_header(&mut output, kem_ct_r.len())?;
-    output
-        .extend_from_slice(kem_ct_r)
-        .map_err(|_| EDHOCError::EncodingError)?;
-    output
-        .extend_from_slice(ciphertext_part.as_slice())
-        .map_err(|_| EDHOCError::EncodingError)?;
-
-    Ok(output)
+    match kem_ct_r {
+        Some(kem_ct_r) => prepend_kem_ct(kem_ct_r, &ciphertext_part),
+        None => Ok(ciphertext_part),
+    }
 }
 
-/// Split `kem.ct_R` off the front of message_3, returning it and the remaining
-/// `bstr(CIPHERTEXT_3)`.
+/// Split a KEM ciphertext off the front of a message, returning it and the remainder.
 ///
-/// This is a separate step rather than part of [`decrypt_message_3_pq`] because of the
-/// ordering the KEM forces: `PRK_3e2m` is derived *from* this ciphertext, so it cannot be an
-/// argument to the function that reads it.
+/// Used for `kem.ct_R` on message_3 and `kem.ct_I` on message_4. It is a separate step rather
+/// than part of the decrypt wrappers because of the ordering the KEM forces: the PRK that keys
+/// the AEAD is derived *from* this ciphertext, so it cannot be an argument to the function
+/// that reads it.
 #[cfg(feature = "pq")]
-fn strip_kem_ct_r(
-    message_3: &BufferMessage3,
-) -> Result<(BytesKemCiphertext, BufferMessage3), EDHOCError> {
-    let (bytestring_length, prefix_length) = decode_bstr_header(message_3.as_slice())?;
+fn strip_kem_ct(
+    message: &EdhocMessageBuffer,
+) -> Result<(BytesKemCiphertext, EdhocMessageBuffer), EDHOCError> {
+    let (bytestring_length, prefix_length) = decode_bstr_header(message.as_slice())?;
 
     if bytestring_length != ML_KEM_CIPHERTEXT_LEN {
         return Err(EDHOCError::ParsingError);
     }
 
-    let mut kem_ct_r: BytesKemCiphertext = [0; ML_KEM_CIPHERTEXT_LEN];
-    kem_ct_r
-        .copy_from_slice(&message_3.as_slice()[prefix_length..prefix_length + bytestring_length]);
+    let mut kem_ct: BytesKemCiphertext = [0; ML_KEM_CIPHERTEXT_LEN];
+    kem_ct.copy_from_slice(&message.as_slice()[prefix_length..prefix_length + bytestring_length]);
 
-    let rest =
-        BufferMessage3::new_from_slice(&message_3.as_slice()[prefix_length + bytestring_length..])
-            .map_err(|_| EDHOCError::ParsingError)?;
+    let rest = EdhocMessageBuffer::new_from_slice(
+        &message.as_slice()[prefix_length + bytestring_length..],
+    )
+    .map_err(|_| EDHOCError::ParsingError)?;
 
-    Ok((kem_ct_r, rest))
+    Ok((kem_ct, rest))
+}
+
+/// Prepend `bstr(kem.ct)` to an already-encoded message.
+#[cfg(feature = "pq")]
+fn prepend_kem_ct(
+    kem_ct: &BytesKemCiphertext,
+    rest: &EdhocMessageBuffer,
+) -> Result<EdhocMessageBuffer, EDHOCError> {
+    let mut output = EdhocMessageBuffer::new();
+    encode_bstr_header(&mut output, kem_ct.len())?;
+    output
+        .extend_from_slice(kem_ct)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(rest.as_slice())
+        .map_err(|_| EDHOCError::EncodingError)?;
+    Ok(output)
+}
+
+/// message_4 for a post-quantum method, optionally prefixed with `kem.ct_I`.
+///
+/// Same shape as message_3: the two-element CBOR sequence `bstr(kem.ct_I), bstr(CIPHERTEXT_4)`
+/// when the Initiator authenticates by KEM, and RFC 9528's single `bstr` otherwise. Also the
+/// suite's 16-byte AEAD tag, where the classical path uses 8.
+#[cfg(feature = "pq")]
+fn encrypt_message_4_pq(
+    crypto: &mut impl CryptoTrait,
+    prk_4e3m: &BytesHashLen,
+    th_4: &BytesHashLen,
+    plaintext_4: &BufferPlaintext4,
+    kem_ct_i: Option<&BytesKemCiphertext>,
+) -> Result<BufferMessage4, EDHOCError> {
+    let ciphertext_part = encrypt_message_4::<CcmTagLen16>(crypto, prk_4e3m, th_4, plaintext_4)?;
+
+    match kem_ct_i {
+        Some(kem_ct_i) => prepend_kem_ct(kem_ct_i, &ciphertext_part),
+        None => Ok(ciphertext_part),
+    }
+}
+
+/// The counterpart to [`encrypt_message_4_pq`], taking what [`strip_kem_ct`] left.
+#[cfg(feature = "pq")]
+fn decrypt_message_4_pq(
+    crypto: &mut impl CryptoTrait,
+    prk_4e3m: &BytesHashLen,
+    th_4: &BytesHashLen,
+    ciphertext_part: &BufferMessage4,
+) -> Result<BufferPlaintext4, EDHOCError> {
+    decrypt_message_4::<CcmTagLen16>(crypto, prk_4e3m, th_4, ciphertext_part)
 }
 
 /// The counterpart to [`encrypt_message_3_pq`], taking what [`strip_kem_ct_r`] left.

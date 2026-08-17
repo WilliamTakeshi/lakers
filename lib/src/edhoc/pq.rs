@@ -21,14 +21,15 @@
 //! and `PRK_3e2m` otherwise. See `pq_edhoc_section3.md` §4.
 
 use super::{
-    compute_mac_2, compute_mac_3, compute_salt_3e2m, compute_th_3, compute_th_4,
-    decrypt_message_3_pq, encode_plaintext_2, encode_plaintext_3, encode_sig_structure,
-    encrypt_message_3_pq, strip_kem_ct_r, BufferMessage3, BytesHashLen, BytesMacSig, ConnId,
-    Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
-    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PreparedMessage2,
-    PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessingM2,
-    ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, Th4Input,
-    VerifiedMessage3, VerifiedPeerMessage2, WaitM3, WaitM3MethodSpecifics,
+    compute_mac_2, compute_mac_3, compute_salt_3e2m, compute_salt_4e3m, compute_th_3, compute_th_4,
+    decode_plaintext_4, decrypt_message_3_pq, decrypt_message_4_pq, encode_plaintext_2,
+    encode_plaintext_3, encode_plaintext_4, encode_sig_structure, encrypt_message_3_pq,
+    encrypt_message_4_pq, strip_kem_ct, BufferMessage3, BufferMessage4, BytesHashLen, BytesMacSig,
+    ConnId, Credential, CredentialKey, CredentialTransfer, Crypto as CryptoTrait, DecodedMessage2,
+    EDHOCError, EadItems, ParsedMessage2Details, ParsedMessage3, PqMessage4I, PqMessage4R,
+    PreparedMessage2, PreparedMessage3, ProcessedM2, ProcessedM2MethodSpecifics, ProcessedM3,
+    ProcessingM2, ProcessingM2MethodSpecifics, ProcessingM3, ProcessingM3MethodSpecifics, Th4Input,
+    VerifiedMessage3, VerifiedPeerMessage2, WaitM3, WaitM3MethodSpecifics, WaitM4,
 };
 use lakers_shared::{
     decode_plaintext_2_pqsig, decode_plaintext_3_pqsig, BytesKemDecapsKey, BytesKemEncapsKey,
@@ -168,7 +169,7 @@ pub(crate) fn r_parse_message_3_pq(
 
     let (prk_3e2m, ciphertext_part) = if r_mode.uses_kem() {
         let kem_dk = kem_dk.as_ref().ok_or(EDHOCError::MissingIdentity)?;
-        let (kem_ct_r, rest) = strip_kem_ct_r(message_3)?;
+        let (kem_ct_r, rest) = strip_kem_ct(message_3)?;
         let ss_r = crypto.kem_decapsulate(kem_dk, &kem_ct_r)?;
         let salt_3e2m = compute_salt_3e2m(crypto, prk_2e, th_2);
         (crypto.hkdf_extract(&salt_3e2m, &ss_r), rest)
@@ -310,9 +311,9 @@ pub(crate) fn i_verify_message_2_pq(
 /// authenticates by KEM.
 ///
 /// The MAC is keyed by `state.prk_4e3m`, which the caller has already resolved per the
-/// normalization rule: `PRK_3e2m` when the Initiator only signs (§3.2, where the ladder passes
-/// through exactly as in RFC 9528's signature methods), and — once §3.3–3.5 land — `PRK_3e2m`
-/// again when it also uses a KEM, because `ss_I` is still a message away.
+/// normalization rule -- it holds the most-derived PRK the Initiator has. That is the real
+/// `PRK_4e3m` when the Initiator only signs (§3.2), and `PRK_3e2m` when it also uses a KEM,
+/// because `ss_I` is still a message away.
 pub(crate) fn i_prepare_message_3_pq(
     state: &ProcessedM2,
     crypto: &mut impl CryptoTrait,
@@ -324,18 +325,26 @@ pub(crate) fn i_prepare_message_3_pq(
         i_mode,
         kem_ct_r,
         dsa_sk,
+        kem_dk,
     } = &state.method_specifics
     else {
         // FIXME: not an error so much as a lack of agreement between peers.
         return Err(EDHOCError::UnsupportedMethod);
     };
 
-    // An Initiator that also authenticates by KEM cannot finish its ladder here; `PRK_4e3m`
-    // waits on message_4's kem.ct_I. Rejected until the deferred-PRK_out work lands.
-    if i_mode.uses_kem() {
-        return Err(EDHOCError::UnsupportedMethod);
-    }
     let dsa_sk = dsa_sk.as_ref().ok_or(EDHOCError::MissingIdentity)?;
+
+    // An Initiator that authenticates by KEM cannot finish its ladder here: PRK_4e3m needs
+    // ss_I, which arrives in message_4's kem.ct_I. Everything message_4 will need to finish
+    // it -- SALT_4e3m, computable now, and the decapsulation key -- is packed up and carried.
+    let pq_message_4 = if i_mode.uses_kem() {
+        Some(PqMessage4I {
+            salt_4e3m: compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3),
+            kem_dk: *kem_dk.as_ref().ok_or(EDHOCError::MissingIdentity)?,
+        })
+    } else {
+        None
+    };
 
     let id_cred_i = match cred_transfer {
         CredentialTransfer::ByValue => cred_i.by_value()?,
@@ -383,7 +392,11 @@ pub(crate) fn i_prepare_message_3_pq(
         },
     );
 
-    Ok(PreparedMessage3 { message_3, th_4 })
+    Ok(PreparedMessage3 {
+        message_3,
+        th_4,
+        pq_message_4,
+    })
 }
 
 /// Verify `SIGNATURE_3` and close the transcript.
@@ -405,15 +418,24 @@ pub(crate) fn r_verify_message_3_pq(
         return Err(EDHOCError::UnsupportedMethod);
     };
 
-    // Mirrors the Initiator's refusal above: with a KEM in play `PRK_4e3m` is not derivable
-    // until message_4 has delivered kem.ct_I.
-    if i_mode.uses_kem() {
-        return Err(EDHOCError::UnsupportedMethod);
-    }
+    // The mirror of the Initiator's position: with a KEM in play PRK_4e3m is not derivable
+    // until message_4 has carried kem.ct_I, so MAC_3 is keyed by PRK_3e2m -- which is also
+    // what the field holds for §3.2, where the two are equal anyway.
     let prk_4e3m = state.prk_3e2m;
 
-    let (_kem_pk, dsa_pk) = credential_keys(&valid_cred_i, *i_mode)?;
+    let (kem_pk, dsa_pk) = credential_keys(&valid_cred_i, *i_mode)?;
     let dsa_pk = dsa_pk.ok_or(EDHOCError::UnsupportedMethod)?;
+
+    // CRED_I is only known now, so this is the first point the Responder can know which key
+    // to encapsulate to in message_4.
+    let pq_message_4 = if i_mode.uses_kem() {
+        Some(PqMessage4R {
+            salt_4e3m: compute_salt_4e3m(crypto, &state.prk_3e2m, &state.th_3),
+            kem_ek: kem_pk.ok_or(EDHOCError::UnsupportedMethod)?,
+        })
+    } else {
+        None
+    };
 
     let mac_3: BytesMacSig = compute_mac_3(
         crypto,
@@ -448,5 +470,55 @@ pub(crate) fn r_verify_message_3_pq(
         },
     );
 
-    Ok(VerifiedMessage3 { prk_4e3m, th_4 })
+    Ok(VerifiedMessage3 {
+        prk_4e3m,
+        th_4,
+        pq_message_4,
+    })
+}
+
+/// Encapsulate to the Initiator's static KEM key, finish the ladder, and send `kem.ct_I`.
+///
+/// This is the Responder's last act and the mirror of what the Initiator did for `kem.ct_R` at
+/// message_2: `PRK_4e3m = Extract(SALT_4e3m, ss_I)`, and only then is `PRK_out` derivable by
+/// either side.
+pub(crate) fn r_prepare_message_4_pq(
+    state: &ProcessedM3,
+    crypto: &mut impl CryptoTrait,
+    pq: &PqMessage4R,
+    ead_4: &EadItems,
+) -> Result<(BytesHashLen, BufferMessage4), EDHOCError> {
+    let (ss_i, kem_ct_i) = crypto.kem_encapsulate(&pq.kem_ek)?;
+    let prk_4e3m = crypto.hkdf_extract(&pq.salt_4e3m, &ss_i);
+
+    let plaintext_4 = encode_plaintext_4(ead_4)?;
+    let message_4 = encrypt_message_4_pq(
+        crypto,
+        &prk_4e3m,
+        &state.th_4,
+        &plaintext_4,
+        Some(&kem_ct_i),
+    )?;
+
+    Ok((prk_4e3m, message_4))
+}
+
+/// Decapsulate `kem.ct_I`, finish the ladder, and only then decrypt CIPHERTEXT_4.
+///
+/// As at message_3, ML-KEM's implicit rejection means a tampered `kem.ct_I` is caught by the
+/// AEAD tag rather than by decapsulation.
+pub(crate) fn i_process_message_4_pq(
+    state: &WaitM4,
+    crypto: &mut impl CryptoTrait,
+    pq: &PqMessage4I,
+    message_4: &BufferMessage4,
+) -> Result<(BytesHashLen, EadItems), EDHOCError> {
+    let (kem_ct_i, ciphertext_part) = strip_kem_ct(message_4)?;
+    let ss_i = crypto.kem_decapsulate(&pq.kem_dk, &kem_ct_i)?;
+    let prk_4e3m = crypto.hkdf_extract(&pq.salt_4e3m, &ss_i);
+
+    let plaintext_4 = decrypt_message_4_pq(crypto, &prk_4e3m, &state.th_4, &ciphertext_part)?;
+    let ead_4 = decode_plaintext_4(&plaintext_4)?;
+
+    Ok((prk_4e3m, ead_4))
 }
