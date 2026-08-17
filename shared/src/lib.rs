@@ -457,6 +457,50 @@ pub enum EDHOCMethod {
     StatSig = 2,
     StatStat = 3,
     PSK = 4,
+    /// §3.2: Initiator signs, Responder KEM & signs. message_4 optional.
+    #[cfg(feature = "pq")]
+    PqSigKemsig = 40,
+    /// §3.3: Initiator KEM & signs, Responder signs. message_4 mandatory.
+    #[cfg(feature = "pq")]
+    PqKemsigSig = 41,
+    /// §3.4: Initiator KEM & signs, Responder KEM only. message_4 mandatory.
+    #[cfg(feature = "pq")]
+    PqKemsigKem = 42,
+    /// §3.5: Initiator KEM & signs, Responder KEM & signs. message_4 mandatory.
+    #[cfg(feature = "pq")]
+    PqKemsigKemsig = 43,
+}
+
+/// How one role authenticates its static identity in a post-quantum method.
+///
+/// This is the axis draft-papon-lake-pq-edhoc §3 varies. The four variants are exactly the
+/// four useful points in the per-role cross product, so the methods above are a naming of
+/// pairs of these rather than four unrelated protocols.
+#[cfg(feature = "pq")]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
+#[repr(C)]
+pub enum PqAuthMode {
+    /// ML-DSA signature only. The peer's PRK contribution is nothing; the ladder passes
+    /// through, as it does for RFC 9528's signature methods.
+    Sign,
+    /// ML-KEM only. The peer proves possession by decapsulating, and contributes a shared
+    /// secret to the ladder.
+    Kem,
+    /// Both: a shared secret *and* a signature.
+    KemSign,
+}
+
+#[cfg(feature = "pq")]
+impl PqAuthMode {
+    /// Whether this role contributes a KEM shared secret to the PRK ladder.
+    pub fn uses_kem(self) -> bool {
+        matches!(self, PqAuthMode::Kem | PqAuthMode::KemSign)
+    }
+
+    /// Whether this role produces a signature.
+    pub fn signs(self) -> bool {
+        matches!(self, PqAuthMode::Sign | PqAuthMode::KemSign)
+    }
 }
 
 impl TryFrom<u8> for EDHOCMethod {
@@ -469,8 +513,44 @@ impl TryFrom<u8> for EDHOCMethod {
             2 => Ok(EDHOCMethod::StatSig),
             3 => Ok(EDHOCMethod::StatStat),
             4 => Ok(EDHOCMethod::PSK),
+            #[cfg(feature = "pq")]
+            40 => Ok(EDHOCMethod::PqSigKemsig),
+            #[cfg(feature = "pq")]
+            41 => Ok(EDHOCMethod::PqKemsigSig),
+            #[cfg(feature = "pq")]
+            42 => Ok(EDHOCMethod::PqKemsigKem),
+            #[cfg(feature = "pq")]
+            43 => Ok(EDHOCMethod::PqKemsigKemsig),
             _ => Err(EDHOCError::UnsupportedMethod),
         }
+    }
+}
+
+#[cfg(feature = "pq")]
+impl EDHOCMethod {
+    /// The per-role authentication modes of a post-quantum method, as
+    /// `(initiator, responder)`; `None` for the classical methods.
+    ///
+    /// The two axes are independent, and resolving them separately is what lets one module
+    /// cover all four §3 variants — the same shape the existing sig/stat split already has.
+    pub fn pq_modes(self) -> Option<(PqAuthMode, PqAuthMode)> {
+        match self {
+            EDHOCMethod::PqSigKemsig => Some((PqAuthMode::Sign, PqAuthMode::KemSign)),
+            EDHOCMethod::PqKemsigSig => Some((PqAuthMode::KemSign, PqAuthMode::Sign)),
+            EDHOCMethod::PqKemsigKem => Some((PqAuthMode::KemSign, PqAuthMode::Kem)),
+            EDHOCMethod::PqKemsigKemsig => Some((PqAuthMode::KemSign, PqAuthMode::KemSign)),
+            _ => None,
+        }
+    }
+
+    /// Whether message_4 carries key material and is therefore mandatory.
+    ///
+    /// True exactly when the Initiator authenticates with a KEM: the Responder can only
+    /// encapsulate to `kem.pk_I` once it has learned `ID_CRED_I` from message_3, so `ss_I`,
+    /// `PRK_4e3m` and hence `PRK_out` do not exist until message_4. §3.2 is the one §3 variant
+    /// where this does not apply.
+    pub fn requires_message_4(self) -> bool {
+        matches!(self.pq_modes(), Some((initiator, _)) if initiator.uses_kem())
     }
 }
 
@@ -1900,5 +1980,106 @@ mod test_encode_info {
         assert_eq!(info.len(), 1 + 3 + context.len() + 2);
         assert_eq!(&info.as_slice()[4..4 + context.len()], &context[..]);
         assert_eq!(&info.as_slice()[info.len() - 2..], &[0x18, 0x20]);
+    }
+}
+
+#[cfg(feature = "pq")]
+#[cfg(test)]
+mod test_pq_methods {
+    use super::*;
+
+    /// The code points are locally chosen and must round-trip through the wire form.
+    ///
+    /// They are *not* private use: the IANA EDHOC Method Type registry has no private-use
+    /// range at all (-65536..-25 and 24..65535 are Specification Required, -24..23 is
+    /// Standards Action with Expert Review). 40-43 are unassigned values in the
+    /// Specification Required range a real registration would come from. See D5.
+    #[test]
+    fn test_pq_method_code_points_round_trip() {
+        for (value, method) in [
+            (40u8, EDHOCMethod::PqSigKemsig),
+            (41, EDHOCMethod::PqKemsigSig),
+            (42, EDHOCMethod::PqKemsigKem),
+            (43, EDHOCMethod::PqKemsigKemsig),
+        ] {
+            assert_eq!(EDHOCMethod::try_from(value).unwrap(), method);
+            assert_eq!(u8::from(method), value);
+        }
+
+        // Unassigned neighbours must stay rejected.
+        for value in [5u8, 39, 44, 255] {
+            assert_eq!(
+                EDHOCMethod::try_from(value),
+                Err(EDHOCError::UnsupportedMethod)
+            );
+        }
+    }
+
+    /// Each method names a pair of per-role modes; the classical methods have none.
+    #[test]
+    fn test_pq_modes_match_the_draft() {
+        use PqAuthMode::*;
+
+        assert_eq!(
+            EDHOCMethod::PqSigKemsig.pq_modes(),
+            Some((Sign, KemSign)),
+            "§3.2: I signs, R KEM & signs"
+        );
+        assert_eq!(
+            EDHOCMethod::PqKemsigSig.pq_modes(),
+            Some((KemSign, Sign)),
+            "§3.3: I KEM & signs, R signs"
+        );
+        assert_eq!(
+            EDHOCMethod::PqKemsigKem.pq_modes(),
+            Some((KemSign, Kem)),
+            "§3.4: I KEM & signs, R KEM only"
+        );
+        assert_eq!(
+            EDHOCMethod::PqKemsigKemsig.pq_modes(),
+            Some((KemSign, KemSign)),
+            "§3.5: both KEM & sign"
+        );
+
+        for classical in [
+            EDHOCMethod::SigSig,
+            EDHOCMethod::SigStat,
+            EDHOCMethod::StatSig,
+            EDHOCMethod::StatStat,
+            EDHOCMethod::PSK,
+        ] {
+            assert_eq!(classical.pq_modes(), None);
+            assert!(!classical.requires_message_4());
+        }
+    }
+
+    /// message_4 carries kem.ct_I exactly when the Initiator authenticates by KEM, which is
+    /// every §3 variant but §3.2.
+    #[test]
+    fn test_message_4_is_mandatory_except_for_3_2() {
+        assert!(!EDHOCMethod::PqSigKemsig.requires_message_4());
+        assert!(EDHOCMethod::PqKemsigSig.requires_message_4());
+        assert!(EDHOCMethod::PqKemsigKem.requires_message_4());
+        assert!(EDHOCMethod::PqKemsigKemsig.requires_message_4());
+    }
+
+    #[test]
+    fn test_auth_mode_predicates() {
+        assert_eq!(
+            (
+                PqAuthMode::Sign.uses_kem(),
+                PqAuthMode::Kem.uses_kem(),
+                PqAuthMode::KemSign.uses_kem()
+            ),
+            (false, true, true)
+        );
+        assert_eq!(
+            (
+                PqAuthMode::Sign.signs(),
+                PqAuthMode::Kem.signs(),
+                PqAuthMode::KemSign.signs()
+            ),
+            (true, false, true)
+        );
     }
 }

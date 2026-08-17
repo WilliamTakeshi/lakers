@@ -347,6 +347,20 @@ cannot be encoded.
 prototype uses locally-chosen values 40–43 (§3.2, §3.3, §3.4, §3.5 respectively), marked TBD in
 the source.
 
+Note for anyone doing the same: unlike the cipher suite registry, the **EDHOC Method Type
+registry has no Private Use range at all**. It allocates −65536..−25 and 24..65535 to
+Specification Required, and −24..23 to Standards Action with Expert Review. So there is no
+correct value for an unregistered experiment to occupy; 40–43 are unassigned values in the
+Specification Required range a real registration would come from. (lakers' own experimental
+PSK method, at 4, sits in the Standards Action range — worth knowing before it is used
+anywhere it might meet another implementation.)
+
+Naming the four variants after their *per-role* modes rather than numbering them turns out to
+matter for more than tidiness. §3's four variants are exactly four points in the cross product
+of {sign, KEM, KEM+sign} per role, so a method is a pair of independent choices, not a
+monolithic protocol identity. That is the same shape RFC 9528's own methods have — `SigStat`
+is "I signs, R static-DH" — and it is what allows one implementation module to cover all four.
+
 ### D6 — no cipher suites · **B**
 
 Deferred to `draft-spm-lake-pqsuites`, whose PQ suites are still `TBD1`/`TBD2`. Without a suite
