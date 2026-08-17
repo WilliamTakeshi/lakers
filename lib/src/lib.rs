@@ -1740,8 +1740,9 @@ mod test {
         (initiator, i_prk_out, message_3, cred_i, responder)
     }
 
-    /// §3.2 end to end. Both roles reach the same `PRK_out` despite deriving `PRK_3e2m` one
-    /// message apart, which is the whole point of the variant.
+    /// §3.2 end to end, the post-quantum twin of [`test_handshake_sigsig`]. Both roles reach
+    /// the same `PRK_out` despite deriving `PRK_3e2m` one message apart, which is the whole
+    /// point of the variant, and then agree on everything derived from it.
     #[cfg(feature = "pq")]
     #[cfg(feature = "test-ead-none")]
     #[test]
@@ -1764,12 +1765,304 @@ mod test {
             cred_i.by_kid().unwrap().as_encoded_value()
         );
 
-        let (_responder, r_prk_out) = responder
+        let (responder, r_prk_out) = responder
             .verify_message_3(cred_i)
             .expect("the responder verifies SIGNATURE_3 with ML-DSA");
 
         assert_eq!(i_prk_out, r_prk_out);
         assert_eq!(initiator.state.prk_out, r_prk_out);
+
+        // §3.2's message_4 is optional and carries no key material, so it is RFC 9528's
+        // message_4 unchanged. It still uses the 8-byte tag, not the suite's 16-byte one;
+        // that is a prototype gap, not a draft divergence, and commit 19 closes it.
+        let (mut responder, message_4) = responder.prepare_message_4(&EadItems::new()).unwrap();
+        let (mut initiator, _ead_4) = initiator.process_message_4(&message_4).unwrap();
+
+        let mut i_oscore_secret = [0; 16];
+        initiator.edhoc_exporter(0u8, &[], &mut i_oscore_secret);
+        let mut i_oscore_salt = [0; 8];
+        initiator.edhoc_exporter(1u8, &[], &mut i_oscore_salt);
+
+        let mut r_oscore_secret = [0; 16];
+        responder.edhoc_exporter(0u8, &[], &mut r_oscore_secret);
+        let mut r_oscore_salt = [0; 8];
+        responder.edhoc_exporter(1u8, &[], &mut r_oscore_salt);
+
+        assert_eq!(i_oscore_secret, r_oscore_secret);
+        assert_eq!(i_oscore_salt, r_oscore_salt);
+
+        // EDHOC-KeyUpdate has to keep the two sides in step too.
+        let context = b"e6bf4b7f83f9436c";
+        assert_eq!(
+            initiator.edhoc_key_update(context),
+            responder.edhoc_key_update(context)
+        );
+
+        let mut i_updated = [0; 16];
+        initiator.edhoc_exporter(0u8, &[], &mut i_updated);
+        let mut r_updated = [0; 16];
+        responder.edhoc_exporter(0u8, &[], &mut r_updated);
+
+        assert_eq!(i_updated, r_updated);
+        assert_ne!(i_updated, i_oscore_secret, "key update must change the key");
+    }
+
+    /// The measured cost of §3.2, against the classical baseline in
+    /// [`test_mixed_methods_are_per_role`]. Pinned so that an encoding change has to be a
+    /// deliberate edit to these numbers -- they are the wire sizes reported to the WG.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    fn test_pq_wire_sizes() {
+        let mut crypto = default_crypto();
+        let (cred_r, r_identity) = pq_responder_material(&mut crypto);
+        let (cred_i, i_identity) = pq_initiator_material(&mut crypto);
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let responder = EdhocResponder::new(default_crypto(), r_identity, cred_r.clone());
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let (responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        initiator.set_identity(i_identity, cred_i.clone()).unwrap();
+        let initiator = initiator.verify_message_2(Some(cred_r)).unwrap();
+        let (_initiator, message_3, _prk_out) = initiator
+            .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
+            .unwrap();
+        let (responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
+        let (responder, _prk_out) = responder.verify_message_3(cred_i).unwrap();
+        let (_responder, message_4) = responder.prepare_message_4(&EadItems::new()).unwrap();
+
+        // METHOD(2) + SUITES_I(2) + bstr header(3) + kem.pk_eph(800) + C_I(1)
+        assert_eq!(message_1.len(), 808);
+        // bstr header(3) + kem.ct_eph(768) + CIPHERTEXT_2(2425), where PLAINTEXT_2 is
+        // C_R(1) + ID_CRED_R(1) + bstr header(3) + SIGNATURE_2(2420)
+        assert_eq!(message_2.len(), 3196);
+        // bstr header(3) + kem.ct_R(768) + bstr header(3) + CIPHERTEXT_3(2440), where
+        // PLAINTEXT_3 is ID_CRED_I(1) + bstr header(3) + SIGNATURE_3(2420) and the tag is 16
+        assert_eq!(message_3.len(), 3214);
+        // bstr header(1) + empty PLAINTEXT_4 + an 8-byte tag: message_4 has not been moved to
+        // the suite's 16-byte tag yet -- a prototype gap, closed by commit 19.
+        assert_eq!(message_4.len(), 9);
+
+        // The classical baseline, same credentials-by-reference and no EAD.
+        let i: BytesP256ElemLen = I.try_into().unwrap();
+        let r: BytesP256ElemLen = R.try_into().unwrap();
+        let (_, sigsig_msg2, sigsig_msg3) = handshake_wire_sizes(
+            EDHOCMethod::SigSig,
+            ResponderIdentity::Signature { r },
+            InitiatorIdentity::Signature { i },
+        );
+        assert_eq!((sigsig_msg2, sigsig_msg3), (102, 77));
+
+        // Roughly 31x and 42x. Both messages are far past any single 802.15.4 frame, which is
+        // the point worth reporting: §3.2 needs fragmentation at every hop.
+        assert!(message_2.len() > 30 * sigsig_msg2);
+        assert!(message_3.len() > 40 * sigsig_msg3);
+    }
+
+    /// Regenerate `test_vectors_pq.md` from a live §3.2 exchange.
+    ///
+    /// `#[ignore]`d on purpose: it writes into the working tree, so it runs on demand
+    /// (`cargo test ... -- --ignored generate_pq_test_vectors`) rather than in CI, and the
+    /// committed file is the artefact.
+    ///
+    /// The result is a *sample trace*, not a reproducible test vector in RFC 9529's sense.
+    /// ML-DSA signing is randomised, so even fixing every key and the ephemeral KEM pair does
+    /// not pin SIGNATURE_2/SIGNATURE_3, and therefore does not pin CIPHERTEXT_2, TH_3 or
+    /// anything below them. What a verifier can do with this file is check every signature and
+    /// re-derive the whole schedule; what it cannot do is regenerate the bytes. That is a
+    /// property of the algorithm choice, and the draft should say so.
+    #[cfg(feature = "pq")]
+    #[cfg(feature = "test-ead-none")]
+    #[test]
+    #[ignore]
+    fn generate_pq_test_vectors() {
+        use std::fmt::Write as _;
+
+        fn hex(out: &mut String, label: &str, bytes: &[u8]) {
+            let _ = writeln!(out, "\n### {} ({} bytes)\n\n```", label, bytes.len());
+            for chunk in bytes.chunks(32) {
+                for b in chunk {
+                    let _ = write!(out, "{:02x}", b);
+                }
+                out.push('\n');
+            }
+            out.push_str("```\n");
+        }
+
+        let mut crypto = default_crypto();
+        let (kem_dk_r, kem_ek_r) = crypto.kem_generate_key_pair().unwrap();
+        let (dsa_sk_r, dsa_pk_r) = crypto.mldsa_generate_key_pair().unwrap();
+        let (dsa_sk_i, dsa_pk_i) = crypto.mldsa_generate_key_pair().unwrap();
+
+        let cred_r = pq_ccs(0x32, &dsa_pk_r, Some(&kem_ek_r));
+        let cred_i = pq_ccs(0x2b, &dsa_pk_i, None);
+
+        let initiator = EdhocInitiator::new(
+            default_crypto(),
+            EDHOCMethod::PqSigKemsig,
+            EDHOCSuite::PqCipherSuite,
+        );
+        let kem_eph = initiator
+            .state
+            .kem_eph
+            .expect("method 40 uses an ephemeral KEM");
+
+        let responder = EdhocResponder::new(
+            default_crypto(),
+            ResponderIdentity::Pq(PqIdentity::KemSign {
+                kem_dk: kem_dk_r,
+                dsa_sk: dsa_sk_r,
+            }),
+            cred_r.clone(),
+        );
+
+        let (initiator, message_1) = initiator.prepare_message_1(None, &EadItems::new()).unwrap();
+        let (responder, _c_i, _ead_1) = responder.process_message_1(&message_1).unwrap();
+        let eph = responder
+            .state
+            .kem_eph
+            .expect("method 40 uses an ephemeral KEM");
+        let h_message_1 = responder.state.h_message_1;
+
+        let (responder, message_2) = responder
+            .prepare_message_2(CredentialTransfer::ByReference, None, &EadItems::new())
+            .unwrap();
+
+        let (mut initiator, _c_r, _ead_2) = initiator.parse_message_2(&message_2).unwrap();
+        let (prk_2e, th_2) = (initiator.state.prk_2e, initiator.state.th_2);
+        initiator
+            .set_identity(
+                InitiatorIdentity::Pq(PqIdentity::Sign { dsa_sk: dsa_sk_i }),
+                cred_i.clone(),
+            )
+            .unwrap();
+        let initiator = initiator.verify_message_2(Some(cred_r.clone())).unwrap();
+        let (prk_3e2m, prk_4e3m, th_3) = (
+            initiator.state.prk_3e2m,
+            initiator.state.prk_4e3m,
+            initiator.state.th_3,
+        );
+        let ProcessedM2MethodSpecifics::Pq { kem_ct_r, .. } = &initiator.state.method_specifics
+        else {
+            panic!("method 40 is a post-quantum method");
+        };
+        let kem_ct_r = kem_ct_r.expect("the responder of method 40 authenticates by KEM");
+
+        let (initiator, message_3, prk_out) = initiator
+            .prepare_message_3(CredentialTransfer::ByReference, &EadItems::new())
+            .unwrap();
+        let (th_4, prk_exporter) = (initiator.state.th_4, initiator.state.prk_exporter);
+
+        let (responder, _id_cred_i, _ead_3) = responder.parse_message_3(&message_3).unwrap();
+        let (responder, r_prk_out) = responder.verify_message_3(cred_i.clone()).unwrap();
+        assert_eq!(prk_out, r_prk_out);
+        let (mut responder, message_4) = responder.prepare_message_4(&EadItems::new()).unwrap();
+        let (mut initiator, _ead_4) = initiator.process_message_4(&message_4).unwrap();
+
+        let mut oscore_secret = [0; 16];
+        initiator.edhoc_exporter(0u8, &[], &mut oscore_secret);
+        let mut oscore_salt = [0; 8];
+        initiator.edhoc_exporter(1u8, &[], &mut oscore_salt);
+        let mut r_oscore_secret = [0; 16];
+        responder.edhoc_exporter(0u8, &[], &mut r_oscore_secret);
+        assert_eq!(oscore_secret, r_oscore_secret);
+
+        let mut out = String::new();
+        out.push_str(concat!(
+            "# Sample trace: draft-papon-lake-pq-edhoc §3.2\n",
+            "\n",
+            "Initiator signs; Responder authenticates with a KEM *and* a signature.\n",
+            "Generated by `generate_pq_test_vectors` in `lib/src/lib.rs`; regenerate with\n",
+            "`cargo test -p lakers --no-default-features --features \\\n",
+            "\"lakers-crypto/rustcrypto, test-ead-none, lakers/pq, lakers-shared/pq_buffers\" \\\n",
+            "-- --ignored generate_pq_test_vectors`.\n",
+            "\n",
+            "## What this is, and what it is not\n",
+            "\n",
+            "This is a **sample trace**, not a reproducible test vector in the sense of RFC 9529.\n",
+            "ML-DSA signing is randomised (hedged), so `SIGNATURE_2` and `SIGNATURE_3` differ on\n",
+            "every run even with every key and the ephemeral KEM pair held fixed -- and with them\n",
+            "`CIPHERTEXT_2`, `TH_3`, `TH_4`, `PRK_out` and everything exported from it.\n",
+            "\n",
+            "A verifier can therefore *check* this trace end to end -- every signature verifies,\n",
+            "every hash and KDF step recomputes -- but cannot *regenerate* its bytes. Producing\n",
+            "byte-reproducible vectors would need the draft to mandate deterministic ML-DSA\n",
+            "signing. This is worth explicit text in the draft; see D15 in\n",
+            "`pq_edhoc_section3.md`.\n",
+            "\n",
+            "## Parameters\n",
+            "\n",
+            "| Field | Value |\n",
+            "| --- | --- |\n",
+            "| METHOD | 40 (`PqSigKemsig`, provisional) |\n",
+            "| SUITES_I | 60 (provisional) |\n",
+            "| Ephemeral KEM | ML-KEM-512 |\n",
+            "| Static KEM (R) | ML-KEM-512 |\n",
+            "| Signature | ML-DSA-44 |\n",
+            "| Hash | SHA-256 |\n",
+            "| AEAD (message_3) | AES-CCM-16-128-128 (16-byte tag) |\n",
+            "| AEAD (message_4) | AES-CCM-16-64-128 (8-byte tag; prototype gap) |\n",
+            "| Credentials | by reference (`ID_CRED` = `kid`) |\n",
+            "| EAD | absent in all messages |\n",
+            "\n",
+            "## Message sizes\n",
+            "\n",
+        ));
+        let _ = writeln!(out, "| Message | Bytes |\n| --- | --- |");
+        let _ = writeln!(out, "| message_1 | {} |", message_1.len());
+        let _ = writeln!(out, "| message_2 | {} |", message_2.len());
+        let _ = writeln!(out, "| message_3 | {} |", message_3.len());
+        let _ = writeln!(out, "| message_4 | {} |", message_4.len());
+
+        out.push_str("\n## Long-term keys\n");
+        hex(&mut out, "I: ML-DSA-44 signing key", &dsa_sk_i);
+        hex(&mut out, "I: ML-DSA-44 verification key", &dsa_pk_i);
+        hex(&mut out, "CRED_I (CCS, kid 0x2b)", cred_i.bytes.as_slice());
+        hex(&mut out, "R: ML-KEM-512 decapsulation key", &kem_dk_r);
+        hex(&mut out, "R: ML-KEM-512 encapsulation key", &kem_ek_r);
+        hex(&mut out, "R: ML-DSA-44 signing key", &dsa_sk_r);
+        hex(&mut out, "R: ML-DSA-44 verification key", &dsa_pk_r);
+        hex(&mut out, "CRED_R (CCS, kid 0x32)", cred_r.bytes.as_slice());
+
+        out.push_str("\n## Ephemeral KEM\n");
+        hex(&mut out, "kem.sk_eph (I)", &kem_eph.sk);
+        hex(&mut out, "kem.pk_eph (I, sent in message_1)", &kem_eph.pk);
+        hex(&mut out, "kem.ct_eph (R, sent in message_2)", &eph.ct_eph);
+        hex(&mut out, "ss_eph", &eph.ss_eph);
+
+        out.push_str("\n## Static KEM\n");
+        hex(&mut out, "kem.ct_R (I, sent in message_3)", &kem_ct_r);
+
+        out.push_str("\n## Messages\n");
+        hex(&mut out, "message_1", message_1.as_slice());
+        hex(&mut out, "message_2", message_2.as_slice());
+        hex(&mut out, "message_3", message_3.as_slice());
+        hex(&mut out, "message_4", message_4.as_slice());
+
+        out.push_str("\n## Key schedule\n");
+        hex(&mut out, "H(message_1)", &h_message_1);
+        hex(&mut out, "TH_2", &th_2);
+        hex(&mut out, "PRK_2e", &prk_2e);
+        hex(&mut out, "TH_3", &th_3);
+        hex(&mut out, "PRK_3e2m", &prk_3e2m);
+        hex(&mut out, "TH_4", &th_4);
+        hex(&mut out, "PRK_4e3m", &prk_4e3m);
+        hex(&mut out, "PRK_out", &prk_out);
+        hex(&mut out, "PRK_exporter", &prk_exporter);
+        hex(&mut out, "OSCORE Master Secret", &oscore_secret);
+        hex(&mut out, "OSCORE Master Salt", &oscore_salt);
+
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_vectors_pq.md");
+        std::fs::write(path, out).expect("writing test_vectors_pq.md");
     }
 
     /// A tampered SIGNATURE_3 must be rejected. The bit is flipped inside PLAINTEXT_3 rather

@@ -556,6 +556,32 @@ implementing from the text has no way to know whether `kemp.pk_R` is the same ke
 or a distinct one belonging to some unstated second parameter set, and §3's variants do give
 each role two long-term keys (see D8), which makes the ambiguity a plausible one to fall into.
 
+### D15 — §3 test vectors cannot be byte-reproducible · **E**
+
+RFC 9529's test vectors are reproducible: fix the two ephemeral private keys and the two static
+private keys, and every subsequent byte of the exchange follows, because ECDSA-with-SHA-256 as
+RFC 9528 uses it is deterministic per RFC 6979. A verifier regenerates the vectors and compares.
+
+ML-DSA is randomised (hedged) by default: FIPS 204 signs with a fresh 32-byte *rnd* unless the
+deterministic variant is selected. So in §3, fixing every key and both ephemeral KEM pairs still
+does not fix `SIGNATURE_2` or `SIGNATURE_3` — and therefore does not fix `CIPHERTEXT_2`, `TH_3`,
+`PLAINTEXT_3`, `TH_4`, `PRK_out`, or anything exported from it. Only `message_1`, `H(message_1)`,
+`TH_2` and `PRK_2e` are reproducible from the inputs.
+
+This is not a defect in the draft's construction, but it changes what a test-vector appendix can
+promise, and D7 asks for one without saying which. It matters for interop testing: an
+implementer cannot diff their output against a reference trace, only verify it.
+
+Observed directly: `test_vectors_pq.md` in this repository is generated from a live exchange and
+is labelled a *sample trace* rather than a test vector for exactly this reason.
+
+**Proposed:** state which mode is expected. Either (a) mandate deterministic ML-DSA signing for
+test-vector generation only, so an appendix can be regenerated and diffed, keeping hedged signing
+for deployment; or (b) keep hedged signing throughout and specify that the appendix is a
+verifiable trace, listing which values an implementation can compare directly (`message_1`,
+`H(message_1)`, `TH_2`, `PRK_2e`) and which it can only check by verifying signatures and
+recomputing the schedule.
+
 ---
 
 ## 6. What the lakers prototype implements
@@ -577,6 +603,7 @@ resolution proposed above.
 | Hash                      | SHAKE256 (via pqsuites)                  | **SHA-256**                             | prototype scope; both are 32-byte outputs so the key schedule and all sizes are unaffected. A deliberate, documented divergence. |
 | CBOR encodings            | none                                     | as in D7                                | D7 |
 | Two-key credential        | none                                     | one AKP COSE_Key, `-1` sig / `-2` KEM   | D8 |
+| Test vectors              | none                                     | a *sample trace*, not reproducible      | D15 |
 
 ---
 
@@ -594,3 +621,5 @@ resolution proposed above.
    prototype's encoding be taken as a starting point?
 6. Given the substantial overlap with `draft-pocero-lake-authkemsig-edhoc`, which document
    should carry the KEM+signature combinations?
+7. **D15:** should a test-vector appendix mandate deterministic ML-DSA signing so it can be
+   regenerated and diffed, or be specified as a verifiable-but-not-reproducible trace?

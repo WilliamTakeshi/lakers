@@ -389,7 +389,7 @@ pub(crate) fn i_prepare_message_3_pq(
 /// Verify `SIGNATURE_3` and close the transcript.
 ///
 /// `TH_4` is `H(TH_3, PLAINTEXT_3, CRED_I)`, reused verbatim from the classical signature
-/// path: `CRED_I` rather than `ID_CRED_I`, which is divergence D4 in `pq_edhoc_section3.md`.
+/// path: `CRED_I` rather than `ID_CRED_I`, which is divergence D2 in `pq_edhoc_section3.md`.
 pub(crate) fn r_verify_message_3_pq(
     state: &ProcessingM3,
     crypto: &mut impl CryptoTrait,
