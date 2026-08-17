@@ -30,6 +30,7 @@ test-ead-authz = [ ]
 defmt = ["dep:defmt"]
 log = ["dep:log"]
 large_buffers = [ "lakers-shared/large_buffers" ]
+pq_buffers = [ "lakers-shared/pq_buffers" ]
 
 [lib]
 crate-type = ["rlib"]

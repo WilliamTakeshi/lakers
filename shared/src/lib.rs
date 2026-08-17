@@ -33,7 +33,9 @@ use pyo3::prelude::*;
 mod python_bindings;
 
 // When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_MESSAGE_SIZE_LEN: usize = if cfg!(feature = "max_message_size_len_1024") {
+pub const MAX_MESSAGE_SIZE_LEN: usize = if cfg!(feature = "max_message_size_len_4096") {
+    4096
+} else if cfg!(feature = "max_message_size_len_1024") {
     1024
 } else if cfg!(feature = "max_message_size_len_512") {
     512
@@ -71,7 +73,9 @@ pub const MAX_EAD_ITEMS: usize = 4;
 // maximum supported length of connection identifier for R
 //
 // When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_KDF_CONTEXT_LEN: usize = if cfg!(feature = "max_kdf_content_len_1024") {
+pub const MAX_KDF_CONTEXT_LEN: usize = if cfg!(feature = "max_kdf_content_len_4096") {
+    4096
+} else if cfg!(feature = "max_kdf_content_len_1024") {
     1024
 } else if cfg!(feature = "max_kdf_content_len_512") {
     512
@@ -87,7 +91,9 @@ pub const MAX_KDF_CONTEXT_LEN: usize = if cfg!(feature = "max_kdf_content_len_10
 pub const MAX_KDF_LABEL_LEN: usize = 15; // for "KEYSTREAM_2"
 
 // When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_BUFFER_LEN: usize = if cfg!(feature = "max_buffer_len_1024") {
+pub const MAX_BUFFER_LEN: usize = if cfg!(feature = "max_buffer_len_4096") {
+    4096
+} else if cfg!(feature = "max_buffer_len_1024") {
     1024
 } else if cfg!(feature = "max_buffer_len_512") {
     512
@@ -129,7 +135,9 @@ pub const KID_LABEL: u8 = 4;
 pub const ENC_STRUCTURE_LEN: usize = 8 + 5 + SHA256_DIGEST_LEN; // 8 for ENCRYPT0
 pub const ENC_STRUCTURE_PSK_LEN: usize = 1 + 1 + 8 + 1 + EXTERNAL_AAD_PSK_LEN; //
 pub const EXTERNAL_AAD_PSK_LEN: usize = 1 + 1 + 2 + 32 + 2 + 38 + 2 + 38 + 1;
-pub const MAX_EAD_LEN: usize = if cfg!(feature = "max_ead_len_1024") {
+pub const MAX_EAD_LEN: usize = if cfg!(feature = "max_ead_len_4096") {
+    4096
+} else if cfg!(feature = "max_ead_len_1024") {
     1024
 } else if cfg!(feature = "max_ead_len_768") {
     768
@@ -145,6 +153,30 @@ pub const MAX_EAD_LEN: usize = if cfg!(feature = "max_ead_len_1024") {
     128
 } else {
     64
+};
+
+/// Maximum length of a credential (`CRED_x`) and of an `ID_CRED_x` carrying one by value.
+///
+/// The default suits a P-256 CCS. A post-quantum credential needs far more: an ML-DSA-44
+/// public key is 1312 bytes and an ML-KEM-512 encapsulation key 800, and a peer that
+/// authenticates with both carries them under one `ID_CRED`.
+//
+// When changing this, beware that it is re-implemented in cbindgen.toml
+pub const MAX_CRED_LEN: usize = if cfg!(feature = "max_cred_len_4096") {
+    4096
+} else {
+    192
+};
+
+/// The `pq_buffers` umbrella is only useful if every ladder it selects actually moves. Catch a
+/// rung that was added to the feature list but not to the constant.
+#[cfg(feature = "pq_buffers")]
+const _: () = {
+    assert!(MAX_MESSAGE_SIZE_LEN >= 4096);
+    assert!(MAX_BUFFER_LEN >= 4096);
+    assert!(MAX_KDF_CONTEXT_LEN >= 4096);
+    assert!(MAX_EAD_LEN >= 4096);
+    assert!(MAX_CRED_LEN >= 4096);
 };
 
 /// Maximum length of a [`ConnId`] (`C_x`).

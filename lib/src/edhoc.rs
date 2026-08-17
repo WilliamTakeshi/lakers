@@ -1954,6 +1954,45 @@ mod tests {
         assert_eq!(roundtrip, plaintext_3);
     }
 
+    /// The `pq_buffers` tier exists so that post-quantum messages fit: a
+    /// draft-papon-lake-pq-edhoc section 3.2 message_3 is roughly 3.2 kB, carrying a 2420-byte
+    /// ML-DSA-44 signature and a 768-byte ML-KEM-512 ciphertext. Round-trip a message of that
+    /// size to show the encode / AEAD / decode path holds it.
+    #[test]
+    fn test_encrypt_decrypt_message_3_pq_sized() {
+        const PQ_MESSAGE_3_LEN: usize = 3210;
+
+        if MAX_MESSAGE_SIZE_LEN < PQ_MESSAGE_3_LEN {
+            return;
+        }
+
+        let plaintext_len = PQ_MESSAGE_3_LEN - AES_CCM_TAG_LEN - 3;
+        let mut plaintext_3 = BufferPlaintext3::new();
+        for i in 0..plaintext_len {
+            plaintext_3.push((i % 251) as u8).unwrap();
+        }
+
+        let message_3 = encrypt_message_3(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &plaintext_3,
+            None,
+        )
+        .unwrap();
+        assert_eq!(message_3.len(), PQ_MESSAGE_3_LEN);
+
+        let roundtrip = decrypt_message_3(
+            &mut default_crypto(),
+            &PRK_3E2M_TV,
+            &TH_3_TV,
+            &message_3,
+            None,
+        )
+        .unwrap();
+        assert_eq!(roundtrip, plaintext_3);
+    }
+
     #[test]
     fn test_decrypt_message_3b_psk() {
         let plaintext_3b = decrypt_message_3(
