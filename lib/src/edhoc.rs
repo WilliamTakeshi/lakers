@@ -214,7 +214,7 @@ pub fn r_prepare_message_2(
 
     ct.fill_with_slice(ciphertext_2.as_slice()).unwrap(); // TODO(hax): same as just above.
 
-    let message_2 = encode_message_2(&state.g_y, &ct);
+    let message_2 = encode_message_2(&state.g_y, &ct)?;
 
     Ok((
         WaitM3 {
@@ -580,17 +580,21 @@ fn encode_message_1(
     Ok(output)
 }
 
-fn encode_message_2(g_y: &BytesP256ElemLen, ciphertext_2: &BufferCiphertext2) -> BufferMessage2 {
+fn encode_message_2(
+    g_y: &BytesP256ElemLen,
+    ciphertext_2: &BufferCiphertext2,
+) -> Result<BufferMessage2, EDHOCError> {
     let mut output: BufferMessage2 = BufferMessage2::new();
 
-    output.push(CBOR_BYTE_STRING).unwrap();
+    encode_bstr_header(&mut output, P256_ELEM_LEN + ciphertext_2.len())?;
     output
-        .push(P256_ELEM_LEN as u8 + ciphertext_2.len() as u8)
-        .unwrap();
-    output.extend_from_slice(g_y).unwrap();
-    output.extend_from_slice(ciphertext_2.as_slice()).unwrap();
+        .extend_from_slice(g_y)
+        .map_err(|_| EDHOCError::EncodingError)?;
+    output
+        .extend_from_slice(ciphertext_2.as_slice())
+        .map_err(|_| EDHOCError::EncodingError)?;
 
-    output
+    Ok(output)
 }
 
 fn compute_th_2(
@@ -1676,16 +1680,42 @@ mod tests {
 
     #[test]
     fn test_encode_message_2() {
-        let message_2 = encode_message_2(&G_Y_TV, &CIPHERTEXT_2_TV);
+        let message_2 = encode_message_2(&G_Y_TV, &CIPHERTEXT_2_TV).unwrap();
 
         assert_eq!(message_2, MESSAGE_2_TV);
     }
 
     #[test]
     fn test_encode_message_2_psk() {
-        let message_2 = encode_message_2(&G_Y_PSK_TV, &CIPHERTEXT_2_PSK_TV);
+        let message_2 = encode_message_2(&G_Y_PSK_TV, &CIPHERTEXT_2_PSK_TV).unwrap();
 
         assert_eq!(message_2, MESSAGE_2_PSK_TV);
+    }
+
+    /// A `G_Y || CIPHERTEXT_2` payload longer than 255 bytes needs a two-byte CBOR length
+    /// header. Encoding it as a one-byte header truncated the length modulo 256 and emitted a
+    /// corrupt message instead of failing.
+    ///
+    /// Only reachable when the buffers are configured large enough to hold such a message, so
+    /// this runs under the `large-buffers` CI leg and is skipped otherwise.
+    #[test]
+    fn test_encode_message_2_two_byte_length() {
+        const CIPHERTEXT_LEN: usize = 256 - P256_ELEM_LEN + 1;
+        const PAYLOAD_LEN: usize = P256_ELEM_LEN + CIPHERTEXT_LEN;
+
+        if MAX_MESSAGE_SIZE_LEN < PAYLOAD_LEN + 3 {
+            return;
+        }
+
+        let ciphertext_2 = BufferCiphertext2::new_from_slice(&[0xaa; CIPHERTEXT_LEN]).unwrap();
+        let message_2 = encode_message_2(&G_Y_TV, &ciphertext_2).unwrap();
+
+        assert_eq!(message_2.len(), PAYLOAD_LEN + 3);
+        assert_eq!(
+            &message_2.as_slice()[..3],
+            &[0x59, (PAYLOAD_LEN >> 8) as u8, PAYLOAD_LEN as u8]
+        );
+        assert_eq!(&message_2.as_slice()[3..3 + P256_ELEM_LEN], &G_Y_TV);
     }
 
     #[test]
