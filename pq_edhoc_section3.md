@@ -27,14 +27,14 @@ TH_2   = H(kem.ct_eph, H(message_1))
 PRK_2e = EDHOC_Extract(TH_2, ss_eph)
 ```
 
-They differ only in how each role authenticates its *static* identity:
+They differ only in how each role authenticates its _static_ identity:
 
-| §   | I authenticates with | R authenticates with | message_4     | Extra cleartext elements               |
-| --- | -------------------- | -------------------- | ------------- | -------------------------------------- |
-| 3.2 | signature            | KEM + signature      | optional      | `kem.ct_R` in message_3                |
-| 3.3 | KEM + signature      | signature            | **mandatory** | `kem.ct_I` in message_4                |
-| 3.4 | KEM + signature      | **KEM only**         | **mandatory** | `kem.ct_R` in m3, `kem.ct_I` in m4     |
-| 3.5 | KEM + signature      | KEM + signature      | **mandatory** | `kem.ct_R` in m3, `kem.ct_I` in m4     |
+| §   | I authenticates with | R authenticates with | message_4     | Extra cleartext elements           |
+| --- | -------------------- | -------------------- | ------------- | ---------------------------------- |
+| 3.2 | signature            | KEM + signature      | optional      | `kem.ct_R` in message_3            |
+| 3.3 | KEM + signature      | signature            | **mandatory** | `kem.ct_I` in message_4            |
+| 3.4 | KEM + signature      | **KEM only**         | **mandatory** | `kem.ct_R` in m3, `kem.ct_I` in m4 |
+| 3.5 | KEM + signature      | KEM + signature      | **mandatory** | `kem.ct_R` in m3, `kem.ct_I` in m4 |
 
 Note that §3.4 is titled "Initiator and Responder KEM and sign — version 1", but its Responder
 does **not** sign; it authenticates by KEM alone, retroactively, via a `MAC_2` carried in
@@ -189,13 +189,13 @@ PRK_out      = EDHOC_KDF(PRK_4e3m, 7, TH_4, hash_length)   -- but see D1
 
 Across §3 the payload signed by each role changes shape:
 
-| Location             | Signed input                                              | Over a MAC? |
-| -------------------- | --------------------------------------------------------- | ----------- |
-| §3.2 `SIGNATURE_2`   | `(PLAINTEXT_2, sign_length)`                              | no          |
-| §3.3 `SIGNATURE_2`   | `(C_R, ID_CRED_R, TH_2, EAD_2, MAC_2, sign_length)`       | **yes**     |
-| §3.5 `SIGNATURE_2`   | `(PLAINTEXT_2, sign_length)`                              | no          |
-| §3.2 `SIGNATURE_3`   | `(ID_CRED_I, TH_3, EAD_3, MAC_3, sign_length)`            | **yes**     |
-| §3.3/3.4/3.5 `SIG_3` | `(PLAINTEXT_3, sign_length)`                              | no          |
+| Location             | Signed input                                        | Over a MAC? |
+| -------------------- | --------------------------------------------------- | ----------- |
+| §3.2 `SIGNATURE_2`   | `(PLAINTEXT_2, sign_length)`                        | no          |
+| §3.3 `SIGNATURE_2`   | `(C_R, ID_CRED_R, TH_2, EAD_2, MAC_2, sign_length)` | **yes**     |
+| §3.5 `SIGNATURE_2`   | `(PLAINTEXT_2, sign_length)`                        | no          |
+| §3.2 `SIGNATURE_3`   | `(ID_CRED_I, TH_3, EAD_3, MAC_3, sign_length)`      | **yes**     |
+| §3.3/3.4/3.5 `SIG_3` | `(PLAINTEXT_3, sign_length)`                        | no          |
 
 A previous revision of this repository's analysis
 ([`pq_edhoc.md`](pq_edhoc.md) gap G5) recorded this as "likely a bug — signature inputs are
@@ -217,7 +217,7 @@ That single fact explains the whole table:
 
 - **§3.2 and §3.5** (R = KEM + signature): `PRK_3e2m` is unavailable at message_2, so there is
   no MAC to sign, and the draft signs `PLAINTEXT_2` directly.
-- **§3.3** (R = signature only): `PRK_3e2m = PRK_2e` by RFC 9528's own rule, so a MAC *is*
+- **§3.3** (R = signature only): `PRK_3e2m = PRK_2e` by RFC 9528's own rule, so a MAC _is_
   available at message_2 — and §3.3 duly defines `MAC_2` and signs it. The one variant that
   can follow RFC 9528's construction does.
 - **§3.4** (R = KEM only): no signature at all, and `MAC_2` is deferred to message_4 where
@@ -250,12 +250,12 @@ The lakers prototype implements the following rule, offered as proposed text.
 > **MAC keying.** Each MAC is keyed by the most-derived PRK available to the signer at the
 > point in the flow where it signs:
 >
-> | MAC     | Peer authenticates by  | Keyed with |
-> | ------- | ---------------------- | ---------- |
-> | `MAC_2` | signature only         | `PRK_3e2m` (= `PRK_2e`) |
-> | `MAC_2` | KEM, or KEM+signature  | **`PRK_2e`** |
-> | `MAC_3` | signature only         | `PRK_4e3m` (= `PRK_3e2m`) |
-> | `MAC_3` | KEM, or KEM+signature  | **`PRK_3e2m`** |
+> | MAC     | Peer authenticates by | Keyed with                |
+> | ------- | --------------------- | ------------------------- |
+> | `MAC_2` | signature only        | `PRK_3e2m` (= `PRK_2e`)   |
+> | `MAC_2` | KEM, or KEM+signature | **`PRK_2e`**              |
+> | `MAC_3` | signature only        | `PRK_4e3m` (= `PRK_3e2m`) |
+> | `MAC_3` | KEM, or KEM+signature | **`PRK_3e2m`**            |
 >
 > **Transcript hashes.** `TH_3 = H(TH_2, PLAINTEXT_2, CRED_R)` and
 > `TH_4 = H(TH_3, PLAINTEXT_3, CRED_I)` — binding the full credential, as RFC 9528 §5.4.1 and
@@ -288,8 +288,8 @@ contradiction · **E** = editorial/under-specified.
 summary in §3.5.3 states `PRK_out = EDHOC_KDF(PRK_4e3m, 7, TH_4, hash_length)`. §3.5.2.5 only
 says the Initiator "can finally compute `PRK_out` as the Responder did", which resolves nothing.
 
-*(Note: an earlier revision of `pq_edhoc.md` located this in §3.5.2.5; the actual conflicting
-formula is in §3.5.2.4.)*
+_(Note: an earlier revision of `pq_edhoc.md` located this in §3.5.2.5; the actual conflicting
+formula is in §3.5.2.4.)_
 
 **Proposed:** `PRK_4e3m`. Deriving `PRK_out` from `PRK_3e2m` would discard `ss_I` entirely,
 which would make the Initiator's KEM authentication contribute nothing to the output key and
@@ -307,7 +307,7 @@ prevent identity misbinding: two credentials sharing a `kid` under different tru
 produce the same transcript.
 
 **Evidence from working code.** lakers already does this the RFC way and would have to be
-*broken* to follow the draft: `compute_th_3` takes the credential bytes
+_broken_ to follow the draft: `compute_th_3` takes the credential bytes
 (`Some(cred_r.bytes.as_slice())`, `lib/src/edhoc.rs:615`) and `compute_th_4` takes them via its
 `cred_i: &[u8]` parameter (`:649`); call sites are in `lib/src/edhoc/sig.rs` and
 `lib/src/edhoc/stat.rs`. This is not a matter of taste — it contradicts a working RFC 9528
@@ -355,7 +355,7 @@ Specification Required range a real registration would come from. (lakers' own e
 PSK method, at 4, sits in the Standards Action range — worth knowing before it is used
 anywhere it might meet another implementation.)
 
-Naming the four variants after their *per-role* modes rather than numbering them turns out to
+Naming the four variants after their _per-role_ modes rather than numbering them turns out to
 matter for more than tidiness. §3's four variants are exactly four points in the cross product
 of {sign, KEM, KEM+sign} per role, so a method is a pair of independent choices, not a
 monolithic protocol identity. That is the same shape RFC 9528's own methods have — `SigStat`
@@ -398,12 +398,12 @@ CCS. The document contains no hex bytes at all.
 
 **Proposed encodings** (implemented by the lakers prototype; offered as a starting point):
 
-| Message   | Encoding                                                                                   |
-| --------- | ------------------------------------------------------------------------------------------ |
-| message_1 | `METHOD, SUITES_I, bstr(kem.pk_eph), C_I, ? EAD_1` — unchanged shape, `G_X` becomes an 800-byte bstr |
+| Message   | Encoding                                                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| message_1 | `METHOD, SUITES_I, bstr(kem.pk_eph), C_I, ? EAD_1` — unchanged shape, `G_X` becomes an 800-byte bstr                                                             |
 | message_2 | `bstr(kem.ct_eph \|\| CIPHERTEXT_2)` — one bstr, mirroring RFC 9528's `bstr(G_Y \|\| CIPHERTEXT_2)`; lengths are suite-fixed so the concatenation is unambiguous |
-| message_3 | `bstr(kem.ct_R), bstr(CIPHERTEXT_3)` — a two-element CBOR sequence, matching the comma in the draft's own figures |
-| message_4 | `bstr(kem.ct_I), bstr(CIPHERTEXT_4)` — same shape                                          |
+| message_3 | `bstr(kem.ct_R), bstr(CIPHERTEXT_3)` — a two-element CBOR sequence, matching the comma in the draft's own figures                                                |
+| message_4 | `bstr(kem.ct_I), bstr(CIPHERTEXT_4)` — same shape                                                                                                                |
 
 A defensible alternative for message_3/message_4 is a single concatenated bstr, matching
 message_2's shape; the WG should pick one. Note that a 768-byte ciphertext requires a two-byte
@@ -416,7 +416,7 @@ Test vectors generated from the working prototype will be published alongside th
 
 ### D8 — no statement on how a peer advertises two long-term keys · **B**
 
-§3.2–3.5 require roles that authenticate with "KEM & signature" to hold *both* a static KEM
+§3.2–3.5 require roles that authenticate with "KEM & signature" to hold _both_ a static KEM
 keypair and a static signature keypair (§3.5.4 says so explicitly). Nothing states how both
 public keys live under a single `ID_CRED`, how `CRED` is formed, or how a verifier knows which
 is which.
@@ -446,14 +446,14 @@ labels differ per key type, `kty` MUST precede them — which deterministic CBOR
 guarantees, since `1` sorts before `-1`.
 
 **This is deliberately the smallest possible divergence, not the most elegant option.** It is
-*not* AKP-conformant: AKP carries one algorithm's key per COSE_Key, with `alg` naming the
+_not_ AKP-conformant: AKP carries one algorithm's key per COSE_Key, with `alg` naming the
 algorithm and `-1` the public key. Two alternatives were considered and rejected for this
 prototype:
 
-| Alternative                                          | Why not                                                                                                                              |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `cnf` holds an array of two AKP COSE_Keys            | RFC 8747 defines the `cnf` member `1` as a COSE_Key, not an array of them. Changing that is a larger break than adding one key label. |
-| A second CWT claim carrying the KEM key              | Cleanest and fully AKP-conformant, but needs a CWT claim number, and the private-use range is negative — more machinery than a prototype needs. |
+| Alternative                               | Why not                                                                                                                                         |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cnf` holds an array of two AKP COSE_Keys | RFC 8747 defines the `cnf` member `1` as a COSE_Key, not an array of them. Changing that is a larger break than adding one key label.           |
+| A second CWT claim carrying the KEM key   | Cleanest and fully AKP-conformant, but needs a CWT claim number, and the private-use range is negative — more machinery than a prototype needs. |
 
 The second row is probably the right long-term answer and the WG should consider it; the
 prototype's choice is what a parser could support with one extra match arm.
@@ -503,7 +503,7 @@ completes at message_4 and what an Initiator may and may not do before then.
 ### D12 — no error handling for KEM decapsulation · **E**
 
 ML-KEM uses implicit rejection: `Decaps` on a malformed or attacker-chosen ciphertext returns a
-*pseudorandom shared secret*, never an error. A failure therefore never surfaces at the KEM
+_pseudorandom shared secret_, never an error. A failure therefore never surfaces at the KEM
 layer — it surfaces one or more messages later as a MAC or AEAD verification failure, possibly
 in a different flight than the one carrying the bad ciphertext.
 
@@ -527,11 +527,11 @@ is the deployment case that matters during transition.
 document, but appears nine times, always naming an object that the `kem.` prefix names
 elsewhere:
 
-| Spelling       | Occurrences | `kem.` twin      | Occurrences |
-| -------------- | ----------- | ---------------- | ----------- |
-| `kemp.ct_eph`  | 5           | `kem.ct_eph`     | 27          |
-| `kemp.pk_R`    | 3           | `kem.pk_R`       | 10          |
-| `kemp.pk_eph`  | 1           | `kem.pk_eph`     | 20          |
+| Spelling      | Occurrences | `kem.` twin  | Occurrences |
+| ------------- | ----------- | ------------ | ----------- |
+| `kemp.ct_eph` | 5           | `kem.ct_eph` | 27          |
+| `kemp.pk_R`   | 3           | `kem.pk_R`   | 10          |
+| `kemp.pk_eph` | 1           | `kem.pk_eph` | 20          |
 
 Locations, by section: §2.2.1.3 (`kemp.ct_eph`, `kemp.pk_R`), §2.2.3.1 (`kemp.pk_eph`),
 §3.2.2.3 (`kemp.ct_eph`, `kemp.pk_R`), §3.3.2.3, §3.4.2.3, §3.5.2.3 (`kemp.ct_eph` in each,
@@ -562,7 +562,7 @@ RFC 9529's test vectors are reproducible: fix the two ephemeral private keys and
 private keys, and every subsequent byte of the exchange follows, because ECDSA-with-SHA-256 as
 RFC 9528 uses it is deterministic per RFC 6979. A verifier regenerates the vectors and compares.
 
-ML-DSA is randomised (hedged) by default: FIPS 204 signs with a fresh 32-byte *rnd* unless the
+ML-DSA is randomised (hedged) by default: FIPS 204 signs with a fresh 32-byte _rnd_ unless the
 deterministic variant is selected. So in §3, fixing every key and both ephemeral KEM pairs still
 does not fix `SIGNATURE_2` or `SIGNATURE_3` — and therefore does not fix `CIPHERTEXT_2`, `TH_3`,
 `PLAINTEXT_3`, `TH_4`, `PRK_out`, or anything exported from it. Only `message_1`, `H(message_1)`,
@@ -573,7 +573,7 @@ promise, and D7 asks for one without saying which. It matters for interop testin
 implementer cannot diff their output against a reference trace, only verify it.
 
 Observed directly: `test_vectors_pq.md` in this repository is generated from a live exchange and
-is labelled a *sample trace* rather than a test vector for exactly this reason.
+is labelled a _sample trace_ rather than a test vector for exactly this reason.
 
 **Proposed:** state which mode is expected. Either (a) mandate deterministic ML-DSA signing for
 test-vector generation only, so an appendix can be regenerated and diffed, keeping hedged signing
@@ -588,18 +588,18 @@ RFC 4944's fragment header carries `datagram_size` in an **11-bit** field, so th
 datagram 6LoWPAN can reassemble is **2047 octets**. Measured from the working implementation
 (§8), every one of the four variants produces at least one message above that:
 
-| §   | Messages over 2047 bytes                |
-| --- | --------------------------------------- |
-| 3.2 | `message_2` (3196), `message_3` (3214)  |
-| 3.3 | `message_2` (3196), `message_3` (2443)  |
-| 3.4 | `message_3` (3214)                      |
-| 3.5 | `message_2` (3196), `message_3` (3214)  |
+| §   | Messages over 2047 bytes               |
+| --- | -------------------------------------- |
+| 3.2 | `message_2` (3196), `message_3` (3214) |
+| 3.3 | `message_2` (3196), `message_3` (2443) |
+| 3.4 | `message_3` (3214)                     |
+| 3.5 | `message_2` (3196), `message_3` (3214) |
 
 This is not a tuning problem. An ML-DSA-44 signature is 2420 bytes on its own, so any message
 carrying one is over the limit before anything else is added, and no parameter choice inside
 ML-DSA-44 changes that. The draft's target deployments are exactly the constrained networks
 where 6LoWPAN is used, and RFC 9528 §A.2 already specifies EDHOC over CoAP, so the resolution
-is available — but it has to be *stated*, because "use 6LoWPAN fragmentation" is the obvious
+is available — but it has to be _stated_, because "use 6LoWPAN fragmentation" is the obvious
 thing an implementer would reach for and it does not work.
 
 **Proposed:** an Applicability/Transport section noting that §3's messages exceed RFC 4944's
@@ -616,21 +616,21 @@ probability of completing a handshake degrades sharply with frame loss.
 Summary of every deliberate deviation from the -00 text. Each is a consequence of §4 or of a
 resolution proposed above.
 
-| Item                      | Draft -00                                | lakers prototype                        | Reason |
-| ------------------------- | ---------------------------------------- | --------------------------------------- | ------ |
-| `SIGNATURE_2`/`_3` input  | ad-hoc tuple, varies per variant         | COSE `Sig_structure` over a MAC         | §4 / D-central |
-| `MAC_2` key               | varies                                   | `PRK_2e` when R uses KEM, else `PRK_3e2m` | §4 |
-| `MAC_3` key               | varies                                   | `PRK_3e2m` when I uses KEM, else `PRK_4e3m` | §4 |
-| `TH_3`/`TH_4` third input | `ID_CRED_x`                              | `CRED_x`                                | D2 |
-| `TH_2` in `PLAINTEXT_2`   | present in §3.2/3.4/3.5                  | removed                                 | D4 |
-| §3.5 `PRK_out`            | contradictory                            | from `PRK_4e3m`                         | D1 |
-| §3.2 `K_4`/`IV_4`         | undefined                                | from `PRK_4e3m` = `PRK_3e2m`, labels 8/9 | D9 |
-| METHOD code points        | none                                     | 40–43, marked TBD                       | D5 |
-| Cipher suite              | none                                     | 60, locally chosen, marked TBD          | D6 |
-| Hash                      | SHAKE256 (via pqsuites)                  | **SHA-256**                             | prototype scope; both are 32-byte outputs so the key schedule and all sizes are unaffected. A deliberate, documented divergence. |
-| CBOR encodings            | none                                     | as in D7                                | D7 |
-| Two-key credential        | none                                     | one AKP COSE_Key, `-1` sig / `-2` KEM   | D8 |
-| Test vectors              | none                                     | a *sample trace*, not reproducible      | D15 |
+| Item                      | Draft -00                        | lakers prototype                            | Reason                                                                                                                           |
+| ------------------------- | -------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `SIGNATURE_2`/`_3` input  | ad-hoc tuple, varies per variant | COSE `Sig_structure` over a MAC             | §4 / D-central                                                                                                                   |
+| `MAC_2` key               | varies                           | `PRK_2e` when R uses KEM, else `PRK_3e2m`   | §4                                                                                                                               |
+| `MAC_3` key               | varies                           | `PRK_3e2m` when I uses KEM, else `PRK_4e3m` | §4                                                                                                                               |
+| `TH_3`/`TH_4` third input | `ID_CRED_x`                      | `CRED_x`                                    | D2                                                                                                                               |
+| `TH_2` in `PLAINTEXT_2`   | present in §3.2/3.4/3.5          | removed                                     | D4                                                                                                                               |
+| §3.5 `PRK_out`            | contradictory                    | from `PRK_4e3m`                             | D1                                                                                                                               |
+| §3.2 `K_4`/`IV_4`         | undefined                        | from `PRK_4e3m` = `PRK_3e2m`, labels 8/9    | D9                                                                                                                               |
+| METHOD code points        | none                             | 40–43, marked TBD                           | D5                                                                                                                               |
+| Cipher suite              | none                             | 60, locally chosen, marked TBD              | D6                                                                                                                               |
+| Hash                      | SHAKE256 (via pqsuites)          | **SHA-256**                                 | prototype scope; both are 32-byte outputs so the key schedule and all sizes are unaffected. A deliberate, documented divergence. |
+| CBOR encodings            | none                             | as in D7                                    | D7                                                                                                                               |
+| Two-key credential        | none                             | one AKP COSE_Key, `-1` sig / `-2` KEM       | D8                                                                                                                               |
+| Test vectors              | none                             | a _sample trace_, not reproducible          | D15                                                                                                                              |
 
 ---
 
@@ -645,14 +645,14 @@ baselines come from `test_mixed_methods_are_per_role` in the same file, at ciphe
 
 ### 7.1 Bytes on the wire
 
-| Method            | message_1 | message_2 | message_3 | message_4 | total | vs. method 0 |
-| ----------------- | --------: | --------: | --------: | --------: | ----: | -----------: |
-| 0 SigSig          |        37 |       102 |        77 |         9 |   225 |         1.0x |
-| 3 StatStat        |        37 |        45 |        19 |         9 |   110 |         0.5x |
-| 40 §3.2           |       808 |      3196 |      3214 |         9 |  7227 |        32.1x |
-| 41 §3.3           |       808 |      3196 |      2443 |       788 |  7235 |        32.2x |
-| 42 §3.4           |       808 |       773 |      3214 |       798 |  5593 |        24.9x |
-| 43 §3.5           |       808 |      3196 |      3214 |       788 |  8006 |        35.6x |
+| Method     | message_1 | message_2 | message_3 | message_4 | total | vs. method 0 |
+| ---------- | --------: | --------: | --------: | --------: | ----: | -----------: |
+| 0 SigSig   |        37 |       102 |        77 |         9 |   225 |         1.0x |
+| 3 StatStat |        37 |        45 |        19 |         9 |   110 |         0.5x |
+| 40 §3.2    |       808 |      3196 |      3214 |         9 |  7227 |        32.1x |
+| 41 §3.3    |       808 |      3196 |      2443 |       788 |  7235 |        32.2x |
+| 42 §3.4    |       808 |       773 |      3214 |       798 |  5593 |        24.9x |
+| 43 §3.5    |       808 |      3196 |      3214 |       788 |  8006 |        35.6x |
 
 Reading the table:
 
@@ -682,14 +682,14 @@ link-layer security on), RFC 4944 6LoWPAN fragmentation with a 4-byte FRAG1 head
 FRAGN headers — so 77 bytes of EDHOC message in the first fragment and 76 in each subsequent
 one.
 
-| Method            | m1 | m2 | m3 | m4 | fragments per handshake |
-| ----------------- | -: | -: | -: | -: | ----------------------: |
-| 0 SigSig          |  1 |  2 |  1 |  1 |                       5 |
-| 3 StatStat        |  1 |  1 |  1 |  1 |                       4 |
-| 40 §3.2           | 11 | 43 | 43 |  1 |                      98 |
-| 41 §3.3           | 11 | 43 | 33 | 11 |                      98 |
-| 42 §3.4           | 11 | 11 | 43 | 11 |                      76 |
-| 43 §3.5           | 11 | 43 | 43 | 11 |                     108 |
+| Method     |  m1 |  m2 |  m3 |  m4 | fragments per handshake |
+| ---------- | --: | --: | --: | --: | ----------------------: |
+| 0 SigSig   |   1 |   2 |   1 |   1 |                       5 |
+| 3 StatStat |   1 |   1 |   1 |   1 |                       4 |
+| 40 §3.2    |  11 |  43 |  43 |   1 |                      98 |
+| 41 §3.3    |  11 |  43 |  33 |  11 |                      98 |
+| 42 §3.4    |  11 |  11 |  43 |  11 |                      76 |
+| 43 §3.5    |  11 |  43 |  43 |  11 |                     108 |
 
 6LoWPAN reassembly is all-or-nothing: losing any one fragment discards the whole datagram. A
 handshake that takes 108 fragments instead of 5 does not merely cost 20x the airtime, it fails
@@ -712,18 +712,18 @@ large, or because a second cipher suite and a method code point above 23 had to 
 Every one was confirmed by restoring the old code and watching a new test fail, never by
 inspection alone.
 
-| # | Defect | Surfaced by |
-| - | ------ | ----------- |
-| 1 | `encode_message_2` computed the bstr length with `as u8`: panics in debug and **silently emits a corrupt message in release** for any CIPHERTEXT_2 over 255 bytes | PQ message_2 is 3196 bytes |
-| 2 | `encrypt_message_3`/`_4` wrote a one-byte length header via a *cast*, truncating silently in both profiles | same |
-| 3 | `decrypt_message_3`/`_4` indexed `message[0]`/`[1]` unchecked — **an empty message_3 panics, reachable from a peer** on the sig and stat paths (the existing empty-message test covered only PSK) | reviewing the same functions |
-| 4 | A valid but too-short bstr reached `aes_ccm_decrypt`, which computes `ciphertext.len() - Tag::LEN` unguarded and underflows | same |
-| 5 | `r_process_message_1` validated SUITES_I against the hardcoded `EDHOC_SUPPORTED_SUITES[0]`, ignoring `crypto.supported_suites()` — any backend offering a second suite had its own selection rejected | adding a PQ cipher suite |
-| 6 | `encode_message_1` emitted `SUITES_I == 24` as a bare `0x18`, which is CBOR's "one length byte follows"; the decoder then ate `G_X`'s bstr header as the suite. **Suites 24 and 25 are both assigned** | same |
-| 7 | `encode_message_1` emitted METHOD >= 24 as a raw byte: method 40 becomes `0x28`, which reads back as the **negative integer -9** | PQ method code points are 40-43 |
-| 8 | Backend crypto conformance tests never ran in CI at all — not the new ML-KEM/ML-DSA ones, nor the pre-existing ECDSA ones | adding trait methods |
-| 9 | `ProcessingM2C::copy_into_c` and `ProcessedM2C::copy_into_c` in the C bindings `todo!()`d on the signature arm — **a Rust panic unwinding across the FFI boundary**, reachable by a C caller that passes method 0 to `initiator_new` | converting the bindings' `todo!()`s |
-| 10 | `EdhocInitiatorWaitM4::completed_without_message_4` returned `EdhocResponderDone`. Both wrap the same `Completed`, so it compiled and no test noticed | the message_4 rework |
+| #   | Defect                                                                                                                                                                                                                               | Surfaced by                         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| 1   | `encode_message_2` computed the bstr length with `as u8`: panics in debug and **silently emits a corrupt message in release** for any CIPHERTEXT_2 over 255 bytes                                                                    | PQ message_2 is 3196 bytes          |
+| 2   | `encrypt_message_3`/`_4` wrote a one-byte length header via a _cast_, truncating silently in both profiles                                                                                                                           | same                                |
+| 3   | `decrypt_message_3`/`_4` indexed `message[0]`/`[1]` unchecked — **an empty message_3 panics, reachable from a peer** on the sig and stat paths (the existing empty-message test covered only PSK)                                    | reviewing the same functions        |
+| 4   | A valid but too-short bstr reached `aes_ccm_decrypt`, which computes `ciphertext.len() - Tag::LEN` unguarded and underflows                                                                                                          | same                                |
+| 5   | `r_process_message_1` validated SUITES_I against the hardcoded `EDHOC_SUPPORTED_SUITES[0]`, ignoring `crypto.supported_suites()` — any backend offering a second suite had its own selection rejected                                | adding a PQ cipher suite            |
+| 6   | `encode_message_1` emitted `SUITES_I == 24` as a bare `0x18`, which is CBOR's "one length byte follows"; the decoder then ate `G_X`'s bstr header as the suite. **Suites 24 and 25 are both assigned**                               | same                                |
+| 7   | `encode_message_1` emitted METHOD >= 24 as a raw byte: method 40 becomes `0x28`, which reads back as the **negative integer -9**                                                                                                     | PQ method code points are 40-43     |
+| 8   | Backend crypto conformance tests never ran in CI at all — not the new ML-KEM/ML-DSA ones, nor the pre-existing ECDSA ones                                                                                                            | adding trait methods                |
+| 9   | `ProcessingM2C::copy_into_c` and `ProcessedM2C::copy_into_c` in the C bindings `todo!()`d on the signature arm — **a Rust panic unwinding across the FFI boundary**, reachable by a C caller that passes method 0 to `initiator_new` | converting the bindings' `todo!()`s |
+| 10  | `EdhocInitiatorWaitM4::completed_without_message_4` returned `EdhocResponderDone`. Both wrap the same `Completed`, so it compiled and no test noticed                                                                                | the message_4 rework                |
 
 Items 1, 2, 3 and 4 are wire-format handling; 3 is remotely triggerable. Items 5, 6 and 7 are
 all the same shape — a CBOR integer or a suite identifier that only ever gets exercised once a
