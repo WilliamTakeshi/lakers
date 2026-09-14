@@ -48,6 +48,9 @@ impl<C> core::fmt::Debug for Crypto<C> {
 
 impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
     fn supported_suites(&self) -> EdhocBuffer<MAX_SUITES_LEN> {
+        // As support for different suites is added, this will be changed to query the CAL for for the algorithms it supports (possibly at creation time), and compute the suites from that.
+        //
+        // Right now, suite support is as hard-coded as the suites are hard-coded in the lakers Crypto trait (e.g. by having a sha256 function).
         EdhocBuffer::<MAX_SUITES_LEN>::new_from_slice(&[EDHOCSuite::CipherSuite2 as u8])
             .expect("the slice is of a length that always fits")
     }

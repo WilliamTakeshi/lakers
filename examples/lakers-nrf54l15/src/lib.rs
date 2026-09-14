@@ -41,8 +41,10 @@ pub enum PacketError {
 }
 
 /// The radio DMAs straight into and out of this buffer, so it is laid out exactly as the frame
-/// goes over the air: the S0 byte, the LENGTH byte, then the PDU. The first PDU byte is the
+/// is sent to the hardware: the S0 byte, the LENGTH byte, then the PDU. The first PDU byte is the
 /// application-level header used to filter packets; the rest is the payload.
+/// For simplicity of the direct-to-hardware demo, it is required that that
+/// CBOR encoded value has exactly one byte.
 const S0: usize = 0;
 const LENGTH: usize = 1;
 const HEADER: usize = 2;

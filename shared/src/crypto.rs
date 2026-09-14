@@ -54,7 +54,7 @@ pub trait Crypto: core::fmt::Debug {
     /// hash.finalize().into()
     /// ```
     fn sha256_digest(&mut self, message: &[u8]) -> BytesHashLen;
-    /// This is in process of being moved to something more embeddec-cal friendly.
+    /// This is [in process of being moved](https://github.com/lake-rs/lakers/issues/437) to something more embedded-cal friendly.
     ///
     /// You can use the type, but don't rely on it being `Default`, for that may panic.
     type HashInProcess<'a>: digest::Digest
