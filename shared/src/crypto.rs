@@ -134,7 +134,7 @@ impl<T: Crypto> Crypto for &mut T {
         T::hkdf_extract(self, salt, ikm)
     }
 
-    fn hkdf_extract_psk(&mut self, salt: &BytesHashLen, ikm: &BytesElemLenPSK) -> BytesHashLen {
+    fn hkdf_extract_psk(&mut self, salt: &BytesHashLen, ikm: &BufferPsk) -> BytesHashLen {
         T::hkdf_extract_psk(self, salt, ikm)
     }
 

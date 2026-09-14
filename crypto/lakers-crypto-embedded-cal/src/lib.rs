@@ -16,7 +16,7 @@ use embedded_cal::{
     HkdfProvider, HmacAlgorithm,
 };
 use lakers_shared::{
-    BytesCcmIvLen, BytesCcmKeyLen, BytesElemLenPSK, BytesHashLen, BytesP256ElemLen, CcmTagLen,
+    BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
     Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
 };
 
@@ -97,12 +97,12 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
             .expect("hmac-sha-256 output is exactly 32 bytes")
     }
 
-    fn hkdf_extract_psk(&mut self, salt: &BytesHashLen, ikm: &BytesElemLenPSK) -> BytesHashLen {
+    fn hkdf_extract_psk(&mut self, salt: &BytesHashLen, ikm: &BufferPsk) -> BytesHashLen {
         let alg = HmacAlgorithmOf::<C>::from_cose_number(5).expect("cal must support hmac-sha-256");
         let prk = self
             .cal
             .hmac()
-            .hkdf_extract(alg, Some(salt), ikm)
+            .hkdf_extract(alg, Some(salt), ikm.as_slice())
             .expect("hkdf-extract over a present salt is infallible");
         prk.as_ref()
             .try_into()
