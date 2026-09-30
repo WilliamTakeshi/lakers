@@ -54,6 +54,9 @@ pub trait Crypto: core::fmt::Debug {
     /// hash.finalize().into()
     /// ```
     fn sha256_digest(&mut self, message: &[u8]) -> BytesHashLen;
+    /// This is [in process of being moved](https://github.com/lake-rs/lakers/issues/437) to something more embedded-cal friendly.
+    ///
+    /// You can use the type, but don't rely on it being `Default`, for that may panic.
     type HashInProcess<'a>: digest::Digest
         + digest::OutputSizeUser<OutputSize = digest::typenum::U32>
     where
@@ -83,6 +86,19 @@ pub trait Crypto: core::fmt::Debug {
     ) -> BytesP256ElemLen;
     fn get_random_byte(&mut self) -> u8;
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen);
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        _private_key: &BytesP256ElemLen,
+        _message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError>;
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        _public_key_x: &BytesP256ElemLen,
+        _message: &[u8],
+        _signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError>;
 }
 
 /// Trait for valid CCM tag lengths.
@@ -98,6 +114,78 @@ impl CcmTagLen for CcmTagLen8 {
 pub struct CcmTagLen16;
 impl CcmTagLen for CcmTagLen16 {
     const LEN: usize = 16;
+}
+
+// Blanket implementation because it is never used ownedly
+//
+// ("region parameter `'a/#1` out of range when instantiating args=[&'_/#0 mut T/#1]").
+// https://github.com/cryspen/hax/issues/1907
+#[cfg(not(hax))]
+impl<T: Crypto> Crypto for &mut T {
+    type HashInProcess<'a>
+        = T::HashInProcess<'a>
+    where
+        Self: 'a;
+
+    fn supported_suites(&self) -> EdhocBuffer<MAX_SUITES_LEN> {
+        T::supported_suites(self)
+    }
+
+    fn sha256_digest(&mut self, message: &[u8]) -> BytesHashLen {
+        T::sha256_digest(self, message)
+    }
+
+    fn sha256_start<'a>(&'a mut self) -> Self::HashInProcess<'a> {
+        T::sha256_start(self)
+    }
+
+    fn hkdf_expand(&mut self, prk: &BytesHashLen, info: &[u8], result: &mut [u8]) {
+        T::hkdf_expand(self, prk, info, result)
+    }
+
+    fn hkdf_extract(&mut self, salt: &BytesHashLen, ikm: &BytesP256ElemLen) -> BytesHashLen {
+        T::hkdf_extract(self, salt, ikm)
+    }
+
+    fn hkdf_extract_psk(&mut self, salt: &BytesHashLen, ikm: &BufferPsk) -> BytesHashLen {
+        T::hkdf_extract_psk(self, salt, ikm)
+    }
+
+    fn aes_ccm_encrypt<const N: usize, TagLen: CcmTagLen>(
+        &mut self,
+        key: &BytesCcmKeyLen,
+        iv: &BytesCcmIvLen,
+        ad: &[u8],
+        plaintext: &[u8],
+    ) -> EdhocBuffer<N> {
+        T::aes_ccm_encrypt::<N, TagLen>(self, key, iv, ad, plaintext)
+    }
+
+    fn aes_ccm_decrypt<const N: usize, TagLen: CcmTagLen>(
+        &mut self,
+        key: &BytesCcmKeyLen,
+        iv: &BytesCcmIvLen,
+        ad: &[u8],
+        ciphertext: &[u8],
+    ) -> Result<EdhocBuffer<N>, EDHOCError> {
+        T::aes_ccm_decrypt::<N, TagLen>(self, key, iv, ad, ciphertext)
+    }
+
+    fn p256_ecdh(
+        &mut self,
+        private_key: &BytesP256ElemLen,
+        public_key: &BytesP256ElemLen,
+    ) -> BytesP256ElemLen {
+        T::p256_ecdh(self, private_key, public_key)
+    }
+
+    fn get_random_byte(&mut self) -> u8 {
+        T::get_random_byte(self)
+    }
+
+    fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen) {
+        T::p256_generate_key_pair(self)
+    }
 }
 
 pub mod test_helper {
@@ -213,5 +301,89 @@ pub mod test_helper {
             .expect("decryption should succeed");
 
         assert_eq!(decrypted.as_slice(), &plaintext);
+    }
+
+    const SK_Y_EVEN: BytesP256ElemLen = [
+        0x07, 0x7a, 0xcf, 0x9d, 0x2b, 0x47, 0xc1, 0xf2, 0xd1, 0x64, 0xd3, 0x5b, 0x62, 0x37, 0x63,
+        0x91, 0x00, 0xe4, 0xe9, 0x8d, 0xf5, 0xbe, 0x99, 0xcb, 0x5c, 0xdf, 0x6b, 0xbc, 0xaa, 0xd5,
+        0xae, 0x03,
+    ];
+    const PK_X_Y_EVEN: BytesP256ElemLen = [
+        0x7c, 0x81, 0x79, 0x42, 0xa1, 0x3d, 0x89, 0xdf, 0x82, 0x07, 0xfb, 0x45, 0xae, 0x82, 0xa4,
+        0xe5, 0xec, 0x48, 0x73, 0xab, 0x82, 0x7a, 0x1c, 0x56, 0x2e, 0x2e, 0xf8, 0x9d, 0x9e, 0xf7,
+        0x5b, 0xef,
+    ];
+
+    const SK_Y_ODD: BytesP256ElemLen = [
+        0x5f, 0xfc, 0xb3, 0x6a, 0x3a, 0x70, 0xc8, 0x19, 0x21, 0xc8, 0x9d, 0xd3, 0x6d, 0x28, 0xaa,
+        0xfe, 0xcc, 0xd5, 0xf2, 0x6e, 0x75, 0xe9, 0x92, 0xa6, 0xe2, 0x18, 0xae, 0xe4, 0x3d, 0x10,
+        0xeb, 0x24,
+    ];
+    const PK_X_Y_ODD: BytesP256ElemLen = [
+        0x20, 0xd2, 0xb0, 0x73, 0x28, 0xff, 0x03, 0x18, 0xc6, 0x3b, 0x98, 0xc6, 0xa8, 0xfd, 0x09,
+        0x0c, 0xe5, 0x50, 0xf3, 0x5f, 0x16, 0x64, 0x0b, 0xb6, 0x3a, 0x87, 0xda, 0x25, 0xdd, 0x91,
+        0x3e, 0xc6,
+    ];
+
+    /// The x coordinate of a third key pair, unrelated to the two above.
+    const PK_X_OTHER: BytesP256ElemLen = [
+        0x7a, 0x5a, 0x3c, 0xda, 0x29, 0x2b, 0xda, 0x43, 0xf4, 0x8e, 0x09, 0x15, 0xe1, 0x79, 0x30,
+        0x7e, 0x61, 0xef, 0x29, 0x7b, 0xf0, 0xc4, 0x07, 0x20, 0x85, 0xae, 0x98, 0xb2, 0x26, 0x00,
+        0x3e, 0xf3,
+    ];
+
+    const SIG_MESSAGE: &[u8] = b"the sig_structure to be signed";
+
+    pub fn test_ecdsa_roundtrip<C: Crypto>(crypto: &mut C) {
+        for (sk, pk_x) in [(SK_Y_EVEN, PK_X_Y_EVEN), (SK_Y_ODD, PK_X_Y_ODD)] {
+            let signature = crypto
+                .p256_ecdsa_sign(&sk, SIG_MESSAGE)
+                .expect("signing should succeed");
+
+            assert!(crypto
+                .p256_ecdsa_verify(&pk_x, SIG_MESSAGE, &signature)
+                .expect("verification should succeed"));
+        }
+    }
+
+    pub fn test_ecdsa_is_deterministic<C: Crypto>(crypto: &mut C) {
+        let first = crypto
+            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
+            .expect("signing should succeed");
+        let second = crypto
+            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
+            .expect("signing should succeed");
+
+        assert_eq!(first, second);
+    }
+
+    pub fn test_ecdsa_rejects_bad_signature<C: Crypto>(crypto: &mut C) {
+        let signature = crypto
+            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
+            .expect("signing should succeed");
+
+        assert!(!crypto
+            .p256_ecdsa_verify(&PK_X_OTHER, SIG_MESSAGE, &signature)
+            .expect("verification should succeed"));
+
+        assert!(!crypto
+            .p256_ecdsa_verify(&PK_X_Y_EVEN, b"a different message", &signature)
+            .expect("verification should succeed"));
+
+        let mut tampered = signature;
+        tampered[0] ^= 0x01;
+        assert!(!crypto
+            .p256_ecdsa_verify(&PK_X_Y_EVEN, SIG_MESSAGE, &tampered)
+            .expect("verification should succeed"));
+
+        let mut tampered = signature;
+        tampered[SIGNATURE_LENGTH - 1] ^= 0x01;
+        assert!(!crypto
+            .p256_ecdsa_verify(&PK_X_Y_EVEN, SIG_MESSAGE, &tampered)
+            .expect("verification should succeed"));
+
+        assert!(!crypto
+            .p256_ecdsa_verify(&PK_X_Y_EVEN, SIG_MESSAGE, &[0u8; SIGNATURE_LENGTH])
+            .expect("verification should succeed"));
     }
 }
