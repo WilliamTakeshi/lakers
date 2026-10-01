@@ -16,8 +16,8 @@ use embedded_cal::{
     HkdfProvider, HmacAlgorithm,
 };
 use lakers_shared::{
-    BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
-    Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
+    BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, BytesSignature,
+    CcmTagLen, Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
 };
 
 /// A [`lakers_shared::Crypto`] implementation that forwards to an embedded-cal [`Cal`] instance.
@@ -207,6 +207,25 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
             .try_into()
             .expect("compact p-256 public key is exactly 32 bytes");
         (private_key, public_key)
+    }
+
+    type SigningKey = core::convert::Infallible;
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        key: &Self::SigningKey,
+        _message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError> {
+        match *key {}
+    }
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        _public_key_x: &BytesP256ElemLen,
+        _message: &[u8],
+        _signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError> {
+        Err(EDHOCError::UnsupportedMethod)
     }
 }
 
