@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 lakers = { package = "lakers", path = "../../lib" }
+lakers-shared = { path = "../../shared" }
 # The hardware-accelerated backend, selected via the lakers-crypto dispatch feature.
 lakers-crypto = { path = "../../crypto", default-features = false, features = ["nrf54l15"] }
 
