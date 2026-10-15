@@ -55,8 +55,8 @@ lakers-crypto-embedded-cal = { package = "lakers-crypto-embedded-cal", path = "c
 lakers = { package = "lakers", path = "lib/", version = "^0.8.0", default-features = false }
 
 # Beware that those two lines are mogrified in CI so that hax can find the proof-libs through the git path:
-hax-lib = { version = "0.3.1", default-features = false, features = ["macros"] }
-# to get proof-libs: hax-lib = { git = "https://github.com/cryspen/hax", default-features = false, features = ["macros"] }
+hax-lib = { version = "0.4.2", default-features = false, features = ["macros"] }
+# to get proof-libs: hax-lib = { git = "https://github.com/cryspen/hax", tag = "cargo-hax-v0.4.2", default-features = false, features = ["macros"] }
 
 [patch.crates-io]
 psa-crypto = { git = "https://github.com/malishav/rust-psa-crypto", branch = "baremetal" }
