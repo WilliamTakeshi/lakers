@@ -1184,8 +1184,7 @@ mod cbor_decoder {
         /// Decode a `u8` value.
         pub fn u8(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            // NOTE: thid could be a `match` with `n @ 0x00..=0x17` clauses but hax doesn't support it
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n)
             } else if 0x18 == n {
                 self.read()
@@ -1197,9 +1196,9 @@ mod cbor_decoder {
         /// Decode an `i8` value.
         pub fn i8(&mut self) -> Result<i8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n as i8)
-            } else if (0x20..=0x37).contains(&n) {
+            } else if n >= 0x20 && n <= 0x37 {
                 Ok(-1 - (n - 0x20) as i8)
             } else if 0x18 == n {
                 let b = self.read()?;
@@ -1210,6 +1209,7 @@ mod cbor_decoder {
                 }
             } else if 0x38 == n {
                 let b = self.read()?;
+                // -1 - b fits in i8 only when b <= 127 (result -128..-1)
                 if b <= 127 {
                     Ok(-1 - b as i8)
                 } else {
@@ -1224,9 +1224,12 @@ mod cbor_decoder {
         pub fn i32_limited(&mut self) -> Result<i32, CBORError> {
             let (major, argument) = self.read_major_argument16()?;
             match major {
-                CBOR_MAJOR_UNSIGNED => Ok(i32::from(argument)),
+                // u16 always fits in i32
+                CBOR_MAJOR_UNSIGNED => Ok(argument as i32),
                 // Can not underflow
-                CBOR_MAJOR_NEGATIVE => Ok(-1 - i32::from(argument)),
+                // argument as i32 is in 0..=65535, so -1 - argument is in -65536..=-1,
+                // so the subtraction never underflows for i32
+                CBOR_MAJOR_NEGATIVE => Ok(-1 - argument as i32),
                 _ => Err(CBORError::DecodingError),
             }
         }
@@ -1242,8 +1245,8 @@ mod cbor_decoder {
             let value = match info {
                 // Workaround-For: https://github.com/cryspen/hax/issues/925
                 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
-                | 18 | 19 | 20 | 21 | 22 | 23 => info.into(),
-                24 => self.read()?.into(),
+                | 18 | 19 | 20 | 21 | 22 | 23 => info as u16,
+                24 => self.read()? as u16,
                 25 => u16::from_be_bytes([self.read()?, self.read()?]),
                 // We do not support those in this function.
                 26 | 27 => return Err(CBORError::DecodingError),
@@ -1261,7 +1264,7 @@ mod cbor_decoder {
         /// Get the raw `i8` or `u8` value.
         pub fn int_raw(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) || (0x20..=0x37).contains(&n) {
+            if n <= 0x17 || n >= 0x20 && n <= 0x37 {
                 Ok(n)
             } else {
                 Err(CBORError::DecodingError)
@@ -1332,14 +1335,14 @@ mod cbor_decoder {
         /// 16-bit form must carry a value above 255 (deterministic CBOR). The 32- and 64-bit forms
         /// (`0x1a`/`0x1b`) are rejected.
         pub fn as_usize(&mut self, b: u8) -> Result<usize, CBORError> {
-            if (0..=0x17).contains(&b) {
-                Ok(usize::from(b))
+            if b <= 0x17 {
+                Ok(b as usize)
             } else if 0x18 == b {
-                self.read().map(usize::from)
+                Ok(self.read()? as usize)
             } else if 0x19 == b {
                 let high = self.read()?;
                 let low = self.read()?;
-                let value = usize::from(u16::from_be_bytes([high, low]));
+                let value = u16::from_be_bytes([high, low]) as usize;
                 if value <= u8::MAX as usize {
                     return Err(CBORError::DecodingError); // deterministic CBOR
                 }
@@ -1356,7 +1359,7 @@ mod cbor_decoder {
 
         /// Get the additionl type info of the given byte (lowest 5 bits).
         pub fn info_of(b: u8) -> u8 {
-            b & 0b000_11111
+            b % 32
         }
 
         /// Check for: an unsigned integer encoded as a single byte
@@ -1404,7 +1407,7 @@ mod cbor_decoder {
                                 .ok_or(CBORError::DecodingError)?;
                         }
                         CBOR_MAJOR_BYTE_STRING | CBOR_MAJOR_TEXT_STRING => {
-                            self.read_slice(argument.into())?;
+                            self.read_slice(argument as usize)?;
                         }
                         CBOR_MAJOR_ARRAY => {
                             remaining_items = remaining_items
@@ -1422,7 +1425,11 @@ mod cbor_decoder {
                 }
             }
 
-            Ok(&self.buf[start..self.position()])
+            // FIXME: we can remove this .ok_or() if we add hax::attributes
+            // that guarantee that self.pos <= self.buf.len()
+            self.buf
+                .get(start..self.position())
+                .ok_or(CBORError::DecodingError)
         }
     }
 }
