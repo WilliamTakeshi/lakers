@@ -2,7 +2,11 @@
 # embedded-cal-nrf54l15's setup). `--allow-erase-all` recovers the chip if debug access is locked
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-runner = ["probe-rs", "run", "--chip", "nRF54L15", "--log-format=oneline", "--allow-erase-all", "--verify"]
+# --disable-double-buffering works around https://github.com/probe-rs/probe-rs/issues/3775:
+# with J-Link probes, double-buffered programming of the nRF54L RRAM corrupts
+# single words at 4 KiB page starts whenever the image differs from what is on
+# the chip, which shows up as "Flash content verification failed".
+runner = ["probe-rs", "run", "--chip", "nRF54L15", "--log-format=oneline", "--allow-erase-all", "--verify", "--disable-double-buffering"]
 
 rustflags = [
   "-C", "linker=flip-link",

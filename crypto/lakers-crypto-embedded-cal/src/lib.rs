@@ -9,11 +9,11 @@
 
 use embedded_cal::accessor::{
     AeadAlgorithmOf, DhAlgorithmOf, DhSecretKeyOf, HashAlgorithmOf, HashProviderOf, HashStateOf,
-    HmacAlgorithmOf,
+    HmacAlgorithmOf, SignAlgorithmOf, SignSecretKeyOf,
 };
 use embedded_cal::{
     AeadAlgorithm, AeadProvider, Cal, DhAlgorithm, DhProvider, HashAlgorithm, HashProvider,
-    HkdfProvider, HmacAlgorithm,
+    HkdfProvider, HmacAlgorithm, SignAlgorithm, SignProvider,
 };
 use lakers_shared::{
     BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, BytesSignature,
@@ -209,23 +209,53 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
         (private_key, public_key)
     }
 
-    type SigningKey = core::convert::Infallible;
+    type SigningKey = BytesP256ElemLen;
 
     fn p256_ecdsa_sign(
         &mut self,
         key: &Self::SigningKey,
-        _message: &[u8],
+        message: &[u8],
     ) -> Result<BytesSignature, EDHOCError> {
-        match *key {}
+        let alg = SignAlgorithmOf::<C>::from_cose_number(-7).expect("cal must support es256");
+        let sign = self.cal.sign();
+        let secret: SignSecretKeyOf<C> = sign
+            .import_secretkey_bytes(alg, key)
+            .map_err(|_| EDHOCError::MissingIdentity)?
+            .into();
+        let signature = sign.sign(&secret, message);
+        let signature_bytes = sign
+            .export_signature_bytes(&signature)
+            .as_ref()
+            .try_into()
+            .expect("es256 signature is exactly 64 bytes");
+        Ok(signature_bytes)
     }
 
     fn p256_ecdsa_verify(
         &mut self,
-        _public_key_x: &BytesP256ElemLen,
-        _message: &[u8],
-        _signature: &BytesSignature,
+        public_key_x: &BytesP256ElemLen,
+        message: &[u8],
+        signature: &BytesSignature,
     ) -> Result<bool, EDHOCError> {
-        Err(EDHOCError::UnsupportedMethod)
+        let alg = SignAlgorithmOf::<C>::from_cose_number(-7).expect("cal must support es256");
+        let sign = self.cal.sign();
+        let Ok(signature) = sign.import_signature_bytes(alg.clone(), signature) else {
+            return Ok(false);
+        };
+
+        let mut compressed = [0u8; 33];
+        compressed[1..].copy_from_slice(public_key_x);
+        for prefix in [0x02, 0x03] {
+            compressed[0] = prefix;
+            let Ok(public) = sign.import_publickey_bytes(alg.clone(), &compressed) else {
+                continue;
+            };
+            if sign.verify(&public, message, &signature).is_ok() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 }
 
@@ -268,3 +298,16 @@ impl<C: Cal> digest::FixedOutput for EmbeddedCalHash<'_, C> {
 }
 
 impl<C: Cal> digest::HashMarker for EmbeddedCalHash<'_, C> {}
+
+#[cfg(test)]
+mod tests {
+    use super::Crypto;
+    use lakers_shared::test_helper::{test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip};
+
+    #[test]
+    fn test_embedded_cal_ecdsa() {
+        let mut crypto = Crypto::new(embedded_cal_rustcrypto::Standalone::standalone());
+        test_ecdsa_roundtrip(&mut crypto, |sk| *sk);
+        test_ecdsa_rejects_bad_signature(&mut crypto, |sk| *sk);
+    }
+}
