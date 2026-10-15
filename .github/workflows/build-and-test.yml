@@ -48,13 +48,14 @@ jobs:
       matrix:
         crypto_backend: [lakers-crypto/psa, lakers-crypto/rustcrypto]
         ead: [ead-none, ead-authz]
+        buffers: [default-buffers, large-buffers]
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
     - name: Run unit tests with feature matrix # note that we only add `--package lakers-ead-authz` when testing with that config
-      run: RUST_BACKTRACE=1 cargo test -p lakers -p lakers-crypto -p lakers-shared ${{ matrix.ead == 'ead-authz' && '-p lakers-ead-authz' || '' }}  --no-default-features --features="${{ matrix.crypto_backend }}, test-${{ matrix.ead }}" --no-fail-fast -- --test-threads 1
+      run: RUST_BACKTRACE=1 cargo test -p lakers -p lakers-crypto -p lakers-shared ${{ matrix.ead == 'ead-authz' && '-p lakers-ead-authz' || '' }}  --no-default-features --features="${{ matrix.crypto_backend }}, test-${{ matrix.ead }}${{ matrix.buffers == 'large-buffers' && ', lakers-shared/large_buffers' || '' }}" --no-fail-fast -- --test-threads 1
 
 
   build-edhoc-package:
@@ -97,7 +98,7 @@ jobs:
       uses: hacspec/hax-actions@main
       with:
         # pin hax to known-working
-        hax_reference: "87ba96831ecfeb7dbb54efcf97036fbc5f25bc71"
+        hax_reference: "5ccf89dd2e996c9f88f2267eaa2a64739c4ca41a"
         fstar: v2025.10.06
 
     - name: Hax extract from lakers and lakers-shared into F* (Fstar)
