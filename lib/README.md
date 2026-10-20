@@ -1,15 +1,10 @@
 # lakers &emsp; [![CI status]][actions] [![Latest Version]][crates.io] [![API Documentation]][docs.rs]
 
 [CI status]: https://github.com/lake-rs/lakers/actions/workflows/build-and-test.yml/badge.svg
-
 [actions]: https://github.com/lake-rs/lakers/actions/workflows/build-and-test.yml
-
 [Latest Version]: https://img.shields.io/crates/v/lakers.svg
-
 [crates.io]: https://crates.io/crates/lakers
-
 [API Documentation]: https://docs.rs/lakers/badge.svg
-
 [docs.rs]: https://docs.rs/lakers
 
 An implementation of [EDHOC (RFC 9528)](https://datatracker.ietf.org/doc/html/rfc9528) in Rust.
@@ -44,7 +39,7 @@ AES-CCM-16-64-128, SHA-256).
 
 # Getting started
 
-To use `lakers` in your Rust project, add it to your Cargo.toml using `cargo add lakers`.
+To use `lakers` in your Rust project, add it to your Cargo.toml using `cargo add lakers`..
 
 Here's a quick look at the API for the Initiator role (for the Responder role, and more details, check the examples or
 the unit tests):
