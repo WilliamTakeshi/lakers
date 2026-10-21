@@ -681,16 +681,37 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
+#[hax_lib::attributes]
+pub struct EadItemsIter<'a> {
+    items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
+    #[hax_lib::refine(pos <= MAX_EAD_ITEMS)]
+    pos: usize,
+}
+
+impl<'a> Iterator for EadItemsIter<'a> {
+    type Item = &'a EADItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut result = None;
+        while self.pos < MAX_EAD_ITEMS && result.is_none() {
+            hax_lib::loop_decreases!(MAX_EAD_ITEMS - self.pos);
+            result = self.items[self.pos].as_ref();
+            self.pos += 1;
+        }
+        result
+    }
+}
+
 impl<'a> IntoIterator for &'a EadItems {
     type Item = &'a EADItem;
 
-    type IntoIter = core::iter::FilterMap<
-        core::slice::Iter<'a, Option<EADItem>>,
-        fn(&Option<EADItem>) -> Option<&EADItem>,
-    >;
+    type IntoIter = EadItemsIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter().filter_map(Option::as_ref)
+        EadItemsIter {
+            items: &self.items,
+            pos: 0,
+        }
     }
 }
 
@@ -712,7 +733,7 @@ impl EadItems {
         Err(item)
     }
 
-    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+    pub fn iter(&self) -> EadItemsIter<'_> {
         self.into_iter()
     }
 
