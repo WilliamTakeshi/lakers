@@ -936,7 +936,7 @@ mod edhoc_parser {
                     .extend_reserve(received_suites_i_len)
                     .or(Err(EDHOCError::ParsingError))?;
                 #[allow(deprecated, reason = "hax complains about mutable references in loops")]
-                for i in write_range {
+                for i in write_range.start..write_range.end {
                     suites_i.content[i] = decoder.u8()?;
                 }
                 Ok((suites_i, decoder))

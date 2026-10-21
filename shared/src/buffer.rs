@@ -207,6 +207,10 @@ impl<const N: usize> EdhocBuffer<N> {
     /// This is not a fully idiomatic Rust API: Preferably, this would return a `&mut [u8]` of the
     /// requested length. However, as `.as_mut_slice()` or `.get_mut()` can not be checked by hax,
     /// pushing and getting a range is the next best thing.
+    #[hax_lib::ensures(|result| match result {
+        Ok(range) => range.end <= N,
+        Err(_) => true,
+    })]
     pub fn extend_reserve(
         &mut self,
         length: usize,
