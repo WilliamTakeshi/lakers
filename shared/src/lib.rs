@@ -468,7 +468,17 @@ pub type MessageBufferError = buffer::EdhocBufferError;
 /// An [`EdhocBuffer`] used for messages.
 pub type EdhocMessageBuffer = EdhocBuffer<MAX_MESSAGE_SIZE_LEN>;
 
+fn is_valid_ead_value(value: &[u8]) -> bool {
+    if value.is_empty() {
+        true
+    } else {
+        let mut decoder = CBORDecoder::new(value);
+        decoder.bytes().is_ok() && decoder.finished()
+    }
+}
+
 /// An owned EAD item.
+#[hax_lib::attributes]
 #[cfg_attr(feature = "python-bindings", pyclass(from_py_object))]
 #[derive(Clone, Debug)]
 pub struct EADItem {
@@ -479,6 +489,7 @@ pub struct EADItem {
     ///
     /// It is a type invariant that any data in here is either empty or contains exactly one CBOR
     /// item.
+    #[hax_lib::refine(is_valid_ead_value(value.as_slice()))]
     value: EADBuffer,
 }
 
@@ -518,6 +529,9 @@ impl EADItem {
             }
             value.extend_from_slice(value_bytes)?;
         };
+        if !is_valid_ead_value(value.as_slice()) {
+            return Err(EdhocBufferError::SliceTooLong);
+        }
 
         Ok(EADItem {
             label,
@@ -837,6 +851,9 @@ mod edhoc_parser {
             // not being an integer.
             (EdhocBuffer::new(), position_after_label)
         };
+        if !is_valid_ead_value(ead_value.as_slice()) {
+            return Err(EDHOCError::ParsingError);
+        }
 
         let item = EADItem {
             label: label
