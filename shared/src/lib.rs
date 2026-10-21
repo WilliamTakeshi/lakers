@@ -146,6 +146,7 @@ impl ConnIdType {
     }
 }
 
+#[hax_lib::attributes]
 impl ConnId {
     /// Construct a ConnId from the result of [`cbor_decoder::int_raw`], which is a
     /// byte that represents a single positive or negative CBOR integer encoded in the 5 bits minor
@@ -155,6 +156,7 @@ impl ConnId {
     #[deprecated(
         note = "This API is only capable of generating a limited sub-set of the supported identifiers."
     )]
+    #[hax_lib::requires(raw >> 5 <= 1 && raw & 0x1f < 24)]
     pub const fn from_int_raw(raw: u8) -> Self {
         debug_assert!(raw >> 5 <= 1, "Major type is not an integer");
         debug_assert!(raw & 0x1f < 24, "Value is not immediate");
@@ -168,11 +170,9 @@ impl ConnId {
     /// The connection ID classification of this connection ID
     ///
     /// Due to the invariants of this type, this classification infallible.
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some())]
     fn classify(&self) -> ConnIdType {
-        let Some(t) = ConnIdType::classify(self.0[0]) else {
-            unreachable!("Type invariant requires valid classification")
-        };
-        t
+        ConnIdType::classify(self.0[0]).expect("type invariant requires valid classification")
     }
 
     /// Read a connection identifier from a given decoder.
