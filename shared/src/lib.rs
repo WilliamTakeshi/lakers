@@ -71,6 +71,7 @@ pub type BufferCiphertext3 = EdhocMessageBuffer;
 pub type BufferCiphertext4 = EdhocMessageBuffer;
 pub type BytesHashLen = [u8; SHA256_DIGEST_LEN];
 pub type BytesP256ElemLen = [u8; P256_ELEM_LEN];
+pub type BytesElemLenPSK = [u8; ELEM_LEN_PSK];
 pub type BufferMessage2 = EdhocMessageBuffer;
 /// Generic buffer type (soft-deprecated).
 ///
@@ -140,7 +141,7 @@ impl ConnIdType {
     fn length(&self) -> usize {
         match self {
             ConnIdType::SingleByte => 1,
-            ConnIdType::ByteString(n) => (1 + n).into(),
+            ConnIdType::ByteString(n) => 1 + *n as usize,
         }
     }
 }
@@ -813,7 +814,7 @@ mod edhoc_parser {
             .map_err(|_| EDHOCError::ParsingError)?;
 
         let is_critical = label < 0;
-        let label = label.abs();
+        let label = label.unsigned_abs();
 
         let position_after_label = decoder.position();
         let (ead_value, position) = if let Ok(_slice) = decoder.bytes() {
@@ -1201,9 +1202,19 @@ mod cbor_decoder {
             } else if (0x20..=0x37).contains(&n) {
                 Ok(-1 - (n - 0x20) as i8)
             } else if 0x18 == n {
-                Ok(self.read()? as i8)
+                let b = self.read()?;
+                if b <= 127 {
+                    Ok(b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else if 0x38 == n {
-                Ok(-1 - (self.read()? - 0x20) as i8)
+                let b = self.read()?;
+                if b <= 127 {
+                    Ok(-1 - b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else {
                 Err(CBORError::DecodingError)
             }
@@ -1434,6 +1445,38 @@ mod test_cbor_decoder {
     }
 
     #[test]
+    fn test_cbor_decoder_i8_two_byte_positive() {
+        assert_eq!(24, CBORDecoder::new(&[0x18, 0x18]).i8().unwrap());
+        assert_eq!(127, CBORDecoder::new(&[0x18, 0x7F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_positive_out_of_range() {
+        assert!(CBORDecoder::new(&[0x18, 0x80]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x18, 0xC8]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x18, 0xFF]).i8().is_err());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative() {
+        assert_eq!(-25, CBORDecoder::new(&[0x38, 0x18]).i8().unwrap());
+        assert_eq!(-100, CBORDecoder::new(&[0x38, 0x63]).i8().unwrap());
+        assert_eq!(-128, CBORDecoder::new(&[0x38, 0x7F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative_small_argument() {
+        assert_eq!(-1, CBORDecoder::new(&[0x38, 0x00]).i8().unwrap());
+        assert_eq!(-32, CBORDecoder::new(&[0x38, 0x1F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative_out_of_range() {
+        assert!(CBORDecoder::new(&[0x38, 0x80]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x38, 0xFF]).i8().is_err());
+    }
+
+    #[test]
     fn test_cbor_decoder_any_as_decoded() {
         // {"bytes": 'val', "n": 123, "tagged": 255(["a", -1]), "deep": [[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]], {1: {2: {3: {4: [simple(0), true, null, simple(128)]}}}}]}
         // Note we can't have floats b/c we don't skip long arguments yet (and all floats have
@@ -1517,6 +1560,19 @@ mod test_ead_items {
         assert_eq!(ead1.label, 1);
 
         items.processed_critical_items().unwrap();
+    }
+
+    #[test]
+    fn test_parse_eads_negative_label_bounds() {
+        let decoded = edhoc_parser::parse_eads(&hex!("39fffe")).unwrap();
+        let item = decoded.iter().next().unwrap();
+        assert_eq!(item.label(), 0xffff);
+        assert!(item.is_critical());
+
+        assert_eq!(
+            edhoc_parser::parse_eads(&hex!("39ffff")).unwrap_err(),
+            EDHOCError::ParsingError
+        );
     }
 
     // Not introducing PartialEq/Eq just for this test, but if it's introduced later for other
