@@ -180,7 +180,7 @@ impl IdCred {
     }
 
     fn bstr_representable_as_int(value: u8) -> bool {
-        (0x0..=0x17).contains(&value) || (0x20..=0x37).contains(&value)
+        value <= 0x17 || (value >= 0x20 && value <= 0x37)
     }
 }
 
