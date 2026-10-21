@@ -193,6 +193,7 @@ impl ConnId {
     }
 
     /// The bytes that form the identifier (an arbitrary byte string)
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_slice(&self) -> &[u8] {
         match self.classify() {
             ConnIdType::SingleByte => &self.0[..1],
@@ -218,6 +219,7 @@ impl ConnId {
     /// let c_i = ConnId::from_slice(&[0xff]).unwrap();
     /// assert_eq!(c_i.as_cbor(), &[0x41, 0xff]);
     /// ```
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_cbor(&self) -> &[u8] {
         &self.0[..self.classify().length()]
     }
