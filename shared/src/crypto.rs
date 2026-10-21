@@ -182,6 +182,7 @@ impl<T: Crypto> Crypto for &mut T {
     }
 }
 
+#[hax_lib::exclude]
 pub mod test_helper {
     use super::*;
 
