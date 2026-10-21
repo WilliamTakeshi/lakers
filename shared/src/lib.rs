@@ -742,8 +742,12 @@ impl EadItems {
     ///
     /// Call this whenever processing EAD items after all processable items have been removed.
     pub fn processed_critical_items(&self) -> Result<(), EDHOCError> {
-        if self.iter().any(|i| i.is_critical) {
-            return Err(EDHOCError::EADUnprocessable);
+        for i in 0..MAX_EAD_ITEMS {
+            if let Some(item) = &self.items[i] {
+                if item.is_critical {
+                    return Err(EDHOCError::EADUnprocessable);
+                }
+            }
         }
         Ok(())
     }
@@ -761,7 +765,14 @@ impl EadItems {
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
     // of tests that's not a meanginful question.
     pub fn len(&self) -> usize {
-        self.items.iter().filter(|x| x.is_some()).count()
+        let mut count = 0;
+        for i in 0..MAX_EAD_ITEMS {
+            hax_lib::loop_invariant!(|i: usize| count <= i);
+            if self.items[i].is_some() {
+                count += 1;
+            }
+        }
+        count
     }
 
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
