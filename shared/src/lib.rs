@@ -253,6 +253,8 @@ impl ConnId {
                 // split_at_mut if not for hax.
                 let mut i = 0;
                 while i < input.len() {
+                    hax_lib::loop_decreases!(input.len() - i);
+                    hax_lib::loop_invariant!(i <= input.len() && i < MAX_CONNID_ENCODED_LEN);
                     s[1 + i] = input[i];
                     i = i + 1;
                 }
