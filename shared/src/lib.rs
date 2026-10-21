@@ -841,24 +841,39 @@ mod helpers {
 // TODO: move to own file (or even to the main crate, once EAD is extracted as an external dependency)
 mod edhoc_parser {
     use super::*;
+    #[cfg(hax)]
+    use hax_lib::ToInt;
 
     pub fn parse_eads(buffer: &[u8]) -> Result<EadItems, EDHOCError> {
         let mut count = 0;
         let mut cursor = 0;
         let mut eads = EadItems::new();
 
+        let mut error = None;
         for _ in 0..MAX_EAD_ITEMS {
-            if !buffer[cursor..].is_empty() {
-                let (item, consumed) = parse_single_ead(&buffer[cursor..])?;
-                eads.items[count] = Some(item);
-                count += 1;
-                cursor += consumed;
+            hax_lib::loop_invariant!(|i: usize| count <= i && cursor <= buffer.len());
+            if error.is_none() && !buffer[cursor..].is_empty() {
+                match parse_single_ead(&buffer[cursor..]) {
+                    Ok((item, consumed)) => {
+                        eads.items[count] = Some(item);
+                        count += 1;
+                        cursor += consumed;
+                    }
+                    Err(e) => error = Some(e),
+                }
             }
         }
 
-        Ok(eads)
+        match error {
+            Some(e) => Err(e),
+            None => Ok(eads),
+        }
     }
 
+    #[hax_lib::ensures(|result| match result {
+        Ok((_, consumed)) => consumed <= input.len(),
+        Err(_) => true,
+    })]
     fn parse_single_ead(input: &[u8]) -> Result<(EADItem, usize), EDHOCError> {
         let mut decoder = CBORDecoder::new(input);
         let label = decoder
@@ -869,6 +884,7 @@ mod edhoc_parser {
         let label = if is_critical { -label } else { label } as u32;
 
         let position_after_label = decoder.position();
+        hax_lib::assert_prop!(position_after_label.to_int() <= input.len().to_int());
         let (ead_value, position) = if let Ok(_slice) = decoder.bytes() {
             // It's not just from `slice`, because EADItem::value is an *encoded* value. (FIXME: It
             // shouldn't be).
