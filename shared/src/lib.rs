@@ -866,7 +866,7 @@ mod edhoc_parser {
             .map_err(|_| EDHOCError::ParsingError)?;
 
         let is_critical = label < 0;
-        let label = label.unsigned_abs();
+        let label = if is_critical { -label } else { label } as u32;
 
         let position_after_label = decoder.position();
         let (ead_value, position) = if let Ok(_slice) = decoder.bytes() {
@@ -1175,6 +1175,7 @@ mod cbor_decoder {
         pos: usize,
     }
 
+    #[hax_lib::attributes]
     impl<'a> CBORDecoder<'a> {
         pub fn new(bytes: &'a [u8]) -> Self {
             CBORDecoder { buf: bytes, pos: 0 }
@@ -1276,6 +1277,10 @@ mod cbor_decoder {
         }
 
         /// Decode up to 16 bit (1+2 byte) of an unsigned or negative integer into an i32
+        #[hax_lib::ensures(|result| match result {
+            Ok(v) => v >= -65536 && v <= 65535,
+            Err(_) => true,
+        })]
         pub fn i32_limited(&mut self) -> Result<i32, CBORError> {
             let (major, argument) = self.read_major_argument16()?;
             match major {
