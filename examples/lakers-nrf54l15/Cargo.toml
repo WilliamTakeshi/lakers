@@ -4,6 +4,21 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[lib]
+test = false
+
+[[bin]]
+name = "initiator"
+test = false
+
+[[bin]]
+name = "responder"
+test = false
+
+[[test]]
+name = "crypto"
+harness = false
+
 [dependencies]
 lakers = { package = "lakers", path = "../../lib" }
 # The hardware-accelerated backend, selected via the lakers-crypto dispatch feature.
@@ -20,3 +35,6 @@ hexlit = "0.5.3"
 defmt = "1.0"
 defmt-rtt = "1.0"
 panic-probe = { version = "1.0", features = ["print-defmt"] }
+
+[dev-dependencies]
+defmt-test = "0.4"

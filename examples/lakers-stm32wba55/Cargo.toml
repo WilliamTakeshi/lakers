@@ -1,0 +1,31 @@
+[package]
+name = "lakers-stm32wba55"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+test = false
+
+[[test]]
+name = "crypto"
+harness = false
+
+[dependencies]
+lakers = { package = "lakers", path = "../../lib" }
+# The hardware-accelerated backend, selected via the lakers-crypto dispatch feature.
+lakers-crypto = { path = "../../crypto", default-features = false, features = ["stm32wba55"] }
+
+embedded-cal-stm32wba55 = { git = "https://github.com/lake-rs/embedded-cal" }
+embedded-cal-software-demo = { git = "https://github.com/lake-rs/embedded-cal" }
+
+stm32-metapac = { version = "18.0", features = ["stm32wba55cg", "rt"] }
+
+cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
+cortex-m-rt = { version = "0.7.2", features = ["device"] }
+defmt = "1.0"
+defmt-rtt = "1.0"
+panic-probe = { version = "1.0", features = ["print-defmt"] }
+
+[dev-dependencies]
+defmt-test = "0.4"
