@@ -60,3 +60,11 @@ hax-lib = { version = "0.3.1", default-features = false, features = ["macros"] }
 
 [patch.crates-io]
 psa-crypto = { git = "https://github.com/malishav/rust-psa-crypto", branch = "baremetal" }
+
+# FIXME: drop once https://github.com/lake-rs/embedded-cal/pull/149 (ECDSA) is merged
+[patch."https://github.com/lake-rs/embedded-cal"]
+embedded-cal = { git = "https://github.com/WilliamTakeshi/embedded-cal", branch = "ecdsa-hardware" }
+embedded-cal-rustcrypto = { git = "https://github.com/WilliamTakeshi/embedded-cal", branch = "ecdsa-hardware" }
+embedded-cal-software-demo = { git = "https://github.com/WilliamTakeshi/embedded-cal", branch = "ecdsa-hardware" }
+embedded-cal-nrf54l15 = { git = "https://github.com/WilliamTakeshi/embedded-cal", branch = "ecdsa-hardware" }
+embedded-cal-stm32wba55 = { git = "https://github.com/WilliamTakeshi/embedded-cal", branch = "ecdsa-hardware" }

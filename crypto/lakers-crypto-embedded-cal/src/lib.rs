@@ -9,15 +9,16 @@
 
 use embedded_cal::accessor::{
     AeadAlgorithmOf, DhAlgorithmOf, DhSecretKeyOf, HashAlgorithmOf, HashProviderOf, HashStateOf,
-    HmacAlgorithmOf,
+    HmacAlgorithmOf, SignAlgorithmOf, SignSecretKeyOf,
 };
 use embedded_cal::{
     AeadAlgorithm, AeadProvider, Cal, DhAlgorithm, DhProvider, HashAlgorithm, HashProvider,
-    HkdfProvider, HmacAlgorithm,
+    HkdfProvider, HmacAlgorithm, SignAlgorithm, SignProvider,
 };
 use lakers_shared::{
-    BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, CcmTagLen,
-    Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
+    BufferPsk, BytesCcmIvLen, BytesCcmKeyLen, BytesHashLen, BytesP256ElemLen, BytesSignature,
+    CcmTagLen, Crypto as CryptoTrait, EDHOCError, EDHOCSuite, EdhocBuffer, MAX_SUITES_LEN,
+    P256_ELEM_LEN,
 };
 
 /// A [`lakers_shared::Crypto`] implementation that forwards to an embedded-cal [`Cal`] instance.
@@ -33,6 +34,22 @@ impl<C> Crypto<C> {
     /// Wraps an embedded-cal [`Cal`](embedded_cal::Cal) instance as a lakers crypto backend.
     pub const fn new(cal: C) -> Self {
         Self { cal }
+    }
+}
+
+impl<C: Cal> Crypto<C> {
+    /// Imports a raw P-256 private key as a [`CryptoTrait::SigningKey`].
+    pub fn import_signing_key(
+        &mut self,
+        private_key: &BytesP256ElemLen,
+    ) -> Result<SignSecretKeyOf<C>, EDHOCError> {
+        let alg = es256_algorithm::<C>();
+        let secret = self
+            .cal
+            .sign()
+            .import_secretkey_bytes(alg, private_key)
+            .map_err(|_| EDHOCError::MissingIdentity)?;
+        Ok(secret.into())
     }
 }
 
@@ -208,6 +225,59 @@ impl<C: Cal + rand_core::TryCryptoRng> CryptoTrait for Crypto<C> {
             .expect("compact p-256 public key is exactly 32 bytes");
         (private_key, public_key)
     }
+
+    type SigningKey = SignSecretKeyOf<C>;
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        signing_key: &Self::SigningKey,
+        message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError> {
+        let sign = self.cal.sign();
+        let signature = sign.sign(signing_key, message);
+        let signature = sign
+            .export_signature_bytes(&signature)
+            .as_ref()
+            .try_into()
+            .expect("es256 signature is exactly 64 bytes");
+        Ok(signature)
+    }
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        public_key_x: &BytesP256ElemLen,
+        message: &[u8],
+        signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError> {
+        let alg = es256_algorithm::<C>();
+        let sign = self.cal.sign();
+        let Ok(signature) = sign.import_signature_bytes(alg.clone(), signature) else {
+            return Ok(false);
+        };
+
+        // the compact representation of the credential omits the y coordinate, so both points
+        // with this x are tried; both belong to the same key holder (private keys d and n-d)
+        for sign_byte in [0x02u8, 0x03u8] {
+            let mut public_key_compressed = [0u8; P256_ELEM_LEN + 1];
+            public_key_compressed[0] = sign_byte;
+            public_key_compressed[1..].copy_from_slice(public_key_x);
+
+            let Ok(public_key) = sign.import_publickey_bytes(alg.clone(), &public_key_compressed)
+            else {
+                continue;
+            };
+
+            if sign.verify(&public_key, message, &signature).is_ok() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+}
+
+fn es256_algorithm<C: Cal>() -> SignAlgorithmOf<C> {
+    SignAlgorithmOf::<C>::from_cose_number(-7).expect("cal must support es256")
 }
 
 fn aes_ccm_algorithm<C: Cal, Tag: CcmTagLen>() -> AeadAlgorithmOf<C> {
@@ -249,3 +319,19 @@ impl<C: Cal> digest::FixedOutput for EmbeddedCalHash<'_, C> {
 }
 
 impl<C: Cal> digest::HashMarker for EmbeddedCalHash<'_, C> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lakers_shared::test_helper::{test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip};
+
+    #[test]
+    fn test_embedded_cal_ecdsa() {
+        let mut crypto = Crypto::new(embedded_cal_rustcrypto::Standalone::standalone());
+        let import = |crypto: &mut Crypto<_>, sk: &BytesP256ElemLen| {
+            crypto.import_signing_key(sk).expect("valid p-256 scalar")
+        };
+        test_ecdsa_roundtrip(&mut crypto, import);
+        test_ecdsa_rejects_bad_signature(&mut crypto, import);
+    }
+}
