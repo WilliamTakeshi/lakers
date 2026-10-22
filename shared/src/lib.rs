@@ -64,6 +64,7 @@ pub const AES_CCM_TAG_LEN: usize = 8;
 pub const MAC_LENGTH: usize = 8; // used for EAD Zeroconf
 pub const MAC_LENGTH_2: usize = MAC_LENGTH;
 pub const MAC_LENGTH_3: usize = MAC_LENGTH_2;
+pub const SIGNATURE_LENGTH: usize = 64; // r + s
 pub const VOUCHER_LEN: usize = MAC_LENGTH;
 pub const MAX_EAD_ITEMS: usize = 4;
 
@@ -181,6 +182,7 @@ pub type BufferCiphertext3 = EdhocMessageBuffer;
 pub type BufferCiphertext4 = EdhocMessageBuffer;
 pub type BytesHashLen = [u8; SHA256_DIGEST_LEN];
 pub type BytesP256ElemLen = [u8; P256_ELEM_LEN];
+pub type BytesSignature = [u8; SIGNATURE_LENGTH];
 pub type BufferMessage2 = EdhocMessageBuffer;
 /// Generic buffer type (soft-deprecated).
 ///

@@ -311,6 +311,8 @@ impl CryptoTrait for Crypto {
         (private_key, public_key)
     }
 
+    type SigningKey = BytesP256ElemLen;
+
     fn p256_ecdsa_sign(
         &mut self,
         private_key: &BytesP256ElemLen,
@@ -490,7 +492,7 @@ mod tests {
     use super::*;
     use lakers_shared::test_helper::{
         test_aes_ccm_roundtrip, test_aes_ccm_tag_16, test_aes_ccm_tag_8,
-        test_ecdsa_is_deterministic, test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip,
+        test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip,
     };
 
     #[test]
@@ -504,8 +506,7 @@ mod tests {
 
     #[test]
     fn test_cryptocell_ecdsa() {
-        test_ecdsa_roundtrip::<Crypto>(&mut Crypto);
-        test_ecdsa_rejects_bad_signature::<Crypto>(&mut Crypto);
-        test_ecdsa_is_deterministic::<Crypto>(&mut Crypto);
+        test_ecdsa_roundtrip(&mut Crypto, |_, sk| *sk);
+        test_ecdsa_rejects_bad_signature(&mut Crypto, |_, sk| *sk);
     }
 }

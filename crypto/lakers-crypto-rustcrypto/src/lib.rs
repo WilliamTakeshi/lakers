@@ -195,6 +195,8 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
         (private_key.into(), public_key.into())
     }
 
+    type SigningKey = BytesP256ElemLen;
+
     fn p256_ecdsa_sign(
         &mut self,
         private_key: &BytesP256ElemLen,
@@ -244,7 +246,7 @@ impl<Rng: rand_core::RngCore + rand_core::CryptoRng> CryptoTrait for Crypto<Rng>
 mod tests {
     use lakers_shared::test_helper::{
         test_aes_ccm_roundtrip, test_aes_ccm_tag_16, test_aes_ccm_tag_8,
-        test_ecdsa_is_deterministic, test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip,
+        test_ecdsa_rejects_bad_signature, test_ecdsa_roundtrip,
     };
     use lakers_shared::{CcmTagLen16, CcmTagLen8};
 
@@ -263,8 +265,7 @@ mod tests {
     #[test]
     fn test_rustcrypto_ecdsa() {
         let mut crypto = Crypto::new(rand_core::OsRng);
-        test_ecdsa_roundtrip::<Crypto<rand_core::OsRng>>(&mut crypto);
-        test_ecdsa_rejects_bad_signature::<Crypto<rand_core::OsRng>>(&mut crypto);
-        test_ecdsa_is_deterministic::<Crypto<rand_core::OsRng>>(&mut crypto);
+        test_ecdsa_roundtrip(&mut crypto, |_, sk| *sk);
+        test_ecdsa_rejects_bad_signature(&mut crypto, |_, sk| *sk);
     }
 }

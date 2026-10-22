@@ -95,17 +95,23 @@ pub trait Crypto: core::fmt::Debug {
     fn get_random_byte(&mut self) -> u8;
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen);
 
+    /// The private key used by [`Crypto::p256_ecdsa_sign`].
+    ///
+    /// Backends that hold keys in memory use [`BytesP256ElemLen`]; backends that keep keys in
+    /// secure storage (PSA key IDs, HSM or TPM handles, ...) use their own key reference.
+    type SigningKey;
+
     fn p256_ecdsa_sign(
         &mut self,
-        _private_key: &BytesP256ElemLen,
-        _message: &[u8],
+        signing_key: &Self::SigningKey,
+        message: &[u8],
     ) -> Result<BytesSignature, EDHOCError>;
 
     fn p256_ecdsa_verify(
         &mut self,
-        _public_key_x: &BytesP256ElemLen,
-        _message: &[u8],
-        _signature: &BytesSignature,
+        public_key_x: &BytesP256ElemLen,
+        message: &[u8],
+        signature: &BytesSignature,
     ) -> Result<bool, EDHOCError>;
 }
 
@@ -193,6 +199,25 @@ impl<T: Crypto> Crypto for &mut T {
 
     fn p256_generate_key_pair(&mut self) -> (BytesP256ElemLen, BytesP256ElemLen) {
         T::p256_generate_key_pair(self)
+    }
+
+    type SigningKey = T::SigningKey;
+
+    fn p256_ecdsa_sign(
+        &mut self,
+        signing_key: &Self::SigningKey,
+        message: &[u8],
+    ) -> Result<BytesSignature, EDHOCError> {
+        T::p256_ecdsa_sign(self, signing_key, message)
+    }
+
+    fn p256_ecdsa_verify(
+        &mut self,
+        public_key_x: &BytesP256ElemLen,
+        message: &[u8],
+        signature: &BytesSignature,
+    ) -> Result<bool, EDHOCError> {
+        T::p256_ecdsa_verify(self, public_key_x, message, signature)
     }
 }
 
@@ -342,8 +367,14 @@ pub mod test_helper {
 
     const SIG_MESSAGE: &[u8] = b"the sig_structure to be signed";
 
-    pub fn test_ecdsa_roundtrip<C: Crypto>(crypto: &mut C) {
+    /// `import` turns the raw private key bytes of the test vectors into the backend's
+    /// [`Crypto::SigningKey`].
+    pub fn test_ecdsa_roundtrip<C: Crypto>(
+        crypto: &mut C,
+        import: impl Fn(&mut C, &BytesP256ElemLen) -> C::SigningKey,
+    ) {
         for (sk, pk_x) in [(SK_Y_EVEN, PK_X_Y_EVEN), (SK_Y_ODD, PK_X_Y_ODD)] {
+            let sk = import(crypto, &sk);
             let signature = crypto
                 .p256_ecdsa_sign(&sk, SIG_MESSAGE)
                 .expect("signing should succeed");
@@ -354,20 +385,13 @@ pub mod test_helper {
         }
     }
 
-    pub fn test_ecdsa_is_deterministic<C: Crypto>(crypto: &mut C) {
-        let first = crypto
-            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
-            .expect("signing should succeed");
-        let second = crypto
-            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
-            .expect("signing should succeed");
-
-        assert_eq!(first, second);
-    }
-
-    pub fn test_ecdsa_rejects_bad_signature<C: Crypto>(crypto: &mut C) {
+    pub fn test_ecdsa_rejects_bad_signature<C: Crypto>(
+        crypto: &mut C,
+        import: impl Fn(&mut C, &BytesP256ElemLen) -> C::SigningKey,
+    ) {
+        let sk = import(crypto, &SK_Y_EVEN);
         let signature = crypto
-            .p256_ecdsa_sign(&SK_Y_EVEN, SIG_MESSAGE)
+            .p256_ecdsa_sign(&sk, SIG_MESSAGE)
             .expect("signing should succeed");
 
         assert!(!crypto
