@@ -100,7 +100,7 @@ jobs:
       uses: hacspec/hax-actions@main
       with:
         # pin hax to known-working
-        hax_reference: "87ba96831ecfeb7dbb54efcf97036fbc5f25bc71"
+        hax_reference: "5ccf89dd2e996c9f88f2267eaa2a64739c4ca41a"
         fstar: v2025.10.06
 
     - name: Hax extract from lakers and lakers-shared into F* (Fstar)
@@ -126,7 +126,7 @@ jobs:
       working-directory: ./shared/proofs/fstar/extraction
       run: |
         curl -o Makefile https://gist.githubusercontent.com/W95Psp/4c304132a1f85c5af4e4959dd6b356c3/raw/Makefile
-        ROOTS=Lakers_shared.Buffer.fst make verify
+        make verify
 
   build-lakers-c:
     needs: unit-tests
