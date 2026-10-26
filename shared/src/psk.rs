@@ -40,6 +40,8 @@ impl BufferPsk {
     }
 }
 
+// hax doesn't implement `Formatter::write_str`
+#[hax_lib::exclude]
 impl core::fmt::Debug for BufferPsk {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("BufferPsk(<redacted>)")

@@ -57,10 +57,12 @@ pub trait Crypto: core::fmt::Debug {
     /// This is [in process of being moved](https://github.com/lake-rs/lakers/issues/437) to something more embedded-cal friendly.
     ///
     /// You can use the type, but don't rely on it being `Default`, for that may panic.
+    #[cfg(not(hax))] // excluded from hax: digest + crypto_common has no F* model
     type HashInProcess<'a>: digest::Digest
         + digest::OutputSizeUser<OutputSize = digest::typenum::U32>
     where
         Self: 'a;
+    #[cfg(not(hax))] // excluded from hax: returns HashInProcess which depends on digest::Digest
     fn sha256_start<'a>(&'a mut self) -> Self::HashInProcess<'a>;
     fn hkdf_expand(&mut self, prk: &BytesHashLen, info: &[u8], result: &mut [u8]);
     fn hkdf_extract(&mut self, salt: &BytesHashLen, ikm: &BytesP256ElemLen) -> BytesHashLen;
@@ -180,6 +182,7 @@ impl<T: Crypto> Crypto for &mut T {
     }
 }
 
+#[hax_lib::exclude]
 pub mod test_helper {
     use super::*;
 

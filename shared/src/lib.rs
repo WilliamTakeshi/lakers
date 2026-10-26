@@ -15,7 +15,6 @@ pub use cbor_decoder::*;
 pub use edhoc_parser::*;
 pub use helpers::*;
 
-use core::num::NonZeroI16;
 use defmt_or_log::trace;
 
 mod crypto;
@@ -27,127 +26,17 @@ pub use cred::*;
 mod buffer;
 pub use buffer::*;
 
+pub mod consts;
+pub use consts::*;
+mod error;
+pub use error::{EDHOCError, ErrCode};
+
 #[cfg(feature = "python-bindings")]
 use pyo3::prelude::*;
 mod psk;
 pub use psk::*;
 #[cfg(feature = "python-bindings")]
 mod python_bindings;
-
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_MESSAGE_SIZE_LEN: usize = if cfg!(feature = "max_message_size_len_1024") {
-    1024
-} else if cfg!(feature = "max_message_size_len_512") {
-    512
-} else if cfg!(feature = "max_message_size_len_448") {
-    448
-} else if cfg!(feature = "max_message_size_len_384") {
-    384
-} else if cfg!(feature = "max_message_size_len_320") {
-    320
-} else if cfg!(feature = "max_message_size_len_256") {
-    256
-} else {
-    // need 128 to handle EAD fields, and 192 for the EAD_1 voucher
-    128 + 64
-};
-
-pub const ID_CRED_LEN: usize = 4;
-pub const SUITES_LEN: usize = 9;
-pub const SUPPORTED_SUITES_LEN: usize = 1;
-pub const EDHOC_METHOD: u8 = 3u8; // stat-stat is the only supported method
-pub const P256_ELEM_LEN: usize = 32;
-pub const SHA256_DIGEST_LEN: usize = 32;
-pub const AES_CCM_KEY_LEN: usize = 16;
-pub const AES_CCM_IV_LEN: usize = 13;
-pub const AES_CCM_TAG_LEN: usize = 8;
-pub const MAC_LENGTH: usize = 8; // used for EAD Zeroconf
-pub const MAC_LENGTH_2: usize = MAC_LENGTH;
-pub const MAC_LENGTH_3: usize = MAC_LENGTH_2;
-pub const VOUCHER_LEN: usize = MAC_LENGTH;
-pub const MAX_EAD_ITEMS: usize = 4;
-
-// maximum supported length of connection identifier for R
-//
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_KDF_CONTEXT_LEN: usize = if cfg!(feature = "max_kdf_content_len_1024") {
-    1024
-} else if cfg!(feature = "max_kdf_content_len_512") {
-    512
-} else if cfg!(feature = "max_kdf_content_len_448") {
-    448
-} else if cfg!(feature = "max_kdf_content_len_384") {
-    384
-} else if cfg!(feature = "max_kdf_content_len_320") {
-    320
-} else {
-    256
-};
-pub const MAX_KDF_LABEL_LEN: usize = 15; // for "KEYSTREAM_2"
-
-// When changing this, beware that it is re-implemented in cbindgen.toml
-pub const MAX_BUFFER_LEN: usize = if cfg!(feature = "max_buffer_len_1024") {
-    1024
-} else if cfg!(feature = "max_buffer_len_512") {
-    512
-} else if cfg!(feature = "max_buffer_len_448") {
-    448
-} else if cfg!(feature = "max_buffer_len_384") {
-    384
-} else {
-    256 + 64
-};
-pub const CBOR_BYTE_STRING: u8 = 0x58u8;
-pub const CBOR_BYTE_STRING_2BYTE_LEN: u8 = 0x59u8;
-pub const CBOR_TEXT_STRING: u8 = 0x78u8;
-pub const CBOR_UINT_1BYTE: u8 = 0x18u8;
-pub const CBOR_NEG_INT_1BYTE_START: u8 = 0x20u8;
-pub const CBOR_NEG_INT_1BYTE_END: u8 = 0x37u8;
-pub const CBOR_UINT_1BYTE_START: u8 = 0x0u8;
-pub const CBOR_UINT_1BYTE_END: u8 = 0x17u8;
-const CBOR_MAJOR_UNSIGNED: u8 = 0 << 5;
-const CBOR_MAJOR_NEGATIVE: u8 = 1 << 5;
-const CBOR_MAJOR_TAG: u8 = 6 << 5;
-const CBOR_MAJOR_FLOATSIMPLE: u8 = 7 << 5;
-pub const CBOR_MAJOR_TEXT_STRING: u8 = 0x60u8;
-pub const CBOR_MAJOR_BYTE_STRING: u8 = 0x40u8;
-pub const CBOR_MAJOR_BYTE_STRING_MAX: u8 = 0x57u8;
-pub const CBOR_MAJOR_ARRAY: u8 = 0x80u8;
-pub const CBOR_MAJOR_ARRAY_MAX: u8 = 0x97u8;
-pub const CBOR_MAJOR_MAP: u8 = 0xA0;
-pub const MAX_INFO_LEN: usize = 2 + SHA256_DIGEST_LEN + // 32-byte digest as bstr
-    1 + MAX_KDF_LABEL_LEN +     // label <24 bytes as tstr
-    3 + MAX_KDF_CONTEXT_LEN +   // context as bstr, up to a 3-byte header
-    1; // length as u8
-       // The PSK is the IKM of an HKDF-SHA-256 extract, whose output is a 256-bit PRK, so entropy beyond
-       // 32 bytes cannot be carried into the key schedule and a longer PSK buys no additional security.
-pub const MAX_PSK_LEN: usize = 32; // arbitrary chosen number
-pub const MIN_PSK_LEN: usize = 16; // Each external PSK MUST be derived from at least 128 bits of entropy, and MUST be at least 128 bits long
-pub const KCCS_LABEL: u8 = 14;
-#[deprecated(note = "Typo for KCCS_LABEL")]
-pub const KCSS_LABEL: u8 = KCCS_LABEL;
-pub const KID_LABEL: u8 = 4;
-
-pub const ENC_STRUCTURE_LEN: usize = 8 + 5 + SHA256_DIGEST_LEN; // 8 for ENCRYPT0
-pub const ENC_STRUCTURE_PSK_LEN: usize = 1 + 1 + 8 + 1 + EXTERNAL_AAD_PSK_LEN; //
-pub const EXTERNAL_AAD_PSK_LEN: usize = 1 + 1 + 2 + 32 + 2 + 38 + 2 + 38 + 1;
-pub const MAX_EAD_LEN: usize = if cfg!(feature = "max_ead_len_1024") {
-    1024
-} else if cfg!(feature = "max_ead_len_768") {
-    768
-} else if cfg!(feature = "max_ead_len_512") {
-    512
-} else if cfg!(feature = "max_ead_len_384") {
-    384
-} else if cfg!(feature = "max_ead_len_256") {
-    256
-} else if cfg!(feature = "max_ead_len_192") {
-    192
-} else if cfg!(feature = "max_ead_len_128") {
-    128
-} else {
-    64
-};
 
 /// Maximum length of a [`ConnId`] (`C_x`).
 ///
@@ -182,6 +71,7 @@ pub type BufferCiphertext3 = EdhocMessageBuffer;
 pub type BufferCiphertext4 = EdhocMessageBuffer;
 pub type BytesHashLen = [u8; SHA256_DIGEST_LEN];
 pub type BytesP256ElemLen = [u8; P256_ELEM_LEN];
+pub type BytesElemLenPSK = [u8; ELEM_LEN_PSK];
 pub type BufferMessage2 = EdhocMessageBuffer;
 /// Generic buffer type (soft-deprecated).
 ///
@@ -251,11 +141,12 @@ impl ConnIdType {
     fn length(&self) -> usize {
         match self {
             ConnIdType::SingleByte => 1,
-            ConnIdType::ByteString(n) => (1 + n).into(),
+            ConnIdType::ByteString(n) => 1 + *n as usize,
         }
     }
 }
 
+#[hax_lib::attributes]
 impl ConnId {
     /// Construct a ConnId from the result of [`cbor_decoder::int_raw`], which is a
     /// byte that represents a single positive or negative CBOR integer encoded in the 5 bits minor
@@ -265,6 +156,7 @@ impl ConnId {
     #[deprecated(
         note = "This API is only capable of generating a limited sub-set of the supported identifiers."
     )]
+    #[hax_lib::requires(raw >> 5 <= 1 && raw & 0x1f < 24)]
     pub const fn from_int_raw(raw: u8) -> Self {
         debug_assert!(raw >> 5 <= 1, "Major type is not an integer");
         debug_assert!(raw & 0x1f < 24, "Value is not immediate");
@@ -278,11 +170,9 @@ impl ConnId {
     /// The connection ID classification of this connection ID
     ///
     /// Due to the invariants of this type, this classification infallible.
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some())]
     fn classify(&self) -> ConnIdType {
-        let Some(t) = ConnIdType::classify(self.0[0]) else {
-            unreachable!("Type invariant requires valid classification")
-        };
-        t
+        ConnIdType::classify(self.0[0]).expect("type invariant requires valid classification")
     }
 
     /// Read a connection identifier from a given decoder.
@@ -303,6 +193,7 @@ impl ConnId {
     }
 
     /// The bytes that form the identifier (an arbitrary byte string)
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_slice(&self) -> &[u8] {
         match self.classify() {
             ConnIdType::SingleByte => &self.0[..1],
@@ -328,6 +219,7 @@ impl ConnId {
     /// let c_i = ConnId::from_slice(&[0xff]).unwrap();
     /// assert_eq!(c_i.as_cbor(), &[0x41, 0xff]);
     /// ```
+    #[hax_lib::requires(ConnIdType::classify(self.0[0]).is_some() && self.classify().length() <= MAX_CONNID_ENCODED_LEN)]
     pub fn as_cbor(&self) -> &[u8] {
         &self.0[..self.classify().length()]
     }
@@ -363,6 +255,8 @@ impl ConnId {
                 // split_at_mut if not for hax.
                 let mut i = 0;
                 while i < input.len() {
+                    hax_lib::loop_decreases!(input.len() - i);
+                    hax_lib::loop_invariant!(i <= input.len() && i < MAX_CONNID_ENCODED_LEN);
                     s[1 + i] = input[i];
                     i = i + 1;
                 }
@@ -410,91 +304,6 @@ impl From<EDHOCSuite> for u8 {
         suite as u8
     }
 }
-
-#[derive(PartialEq, Debug)]
-#[non_exhaustive]
-pub enum EDHOCError {
-    /// In an exchange, a credential was set as "expected", but the credential configured by the
-    /// peer did not match what was presented. This is more an application internal than an EDHOC
-    /// error: When the application sets the expected credential, that process should be informed
-    /// by the known details.
-    UnexpectedCredential,
-    /// A credential was well formed, but of a type that may not be used the way it was presented:
-    /// in particular a credential carrying a symmetric key (a PSK), sent by value rather than
-    /// identified by reference.
-    ///
-    /// Unlike [`EDHOCError::UnexpectedCredential`] this does not depend on what the application
-    /// was expecting. Such a credential is refused unconditionally, because honouring it would
-    /// mean deriving key material from the peer's own message.
-    WrongCredentialType,
-    MissingIdentity,
-    IdentityAlreadySet,
-    MacVerificationFailed,
-    UnsupportedMethod,
-    UnsupportedCipherSuite,
-    ParsingError,
-    EncodingError,
-    CredentialTooLongError,
-    EadLabelTooLongError,
-    EadTooLongError,
-    /// An EAD was received that was either not known (and critical), or not understood, or
-    /// otherwise erroneous.
-    EADUnprocessable,
-    /// The credential or EADs could be processed (possibly by a third party), but the decision
-    /// based on that was to not to continue the EDHOC session.
-    ///
-    /// See also
-    /// <https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz#name-edhoc-error-access-denied>
-    AccessDenied,
-}
-
-impl EDHOCError {
-    /// The ERR_CODE corresponding to the error
-    ///
-    /// Errors that refer to internal limitations (such as EadTooLongError) are treated the same
-    /// way as parsing errors, and return an unspecified error: Those are equivalent to limitations
-    /// of the parser, and a constrained system can not be expected to differentiate between "the
-    /// standard allows this but my number space is too small" and "this violates the standard".
-    ///
-    /// If an EDHOCError is returned through EDHOC, it will use this in its EDHOC error message.
-    ///
-    /// Note that this on its own is insufficient to create an error message: Additional ERR_INFO
-    /// is needed, which may or may not be available with the EDHOCError alone.
-    ///
-    /// TODO: Evolve the EDHOCError type such that all information needed is available.
-    pub fn err_code(&self) -> ErrCode {
-        use EDHOCError::*;
-        match self {
-            UnexpectedCredential => ErrCode::UNSPECIFIED,
-            WrongCredentialType => ErrCode::UNSPECIFIED,
-            MissingIdentity => ErrCode::UNSPECIFIED,
-            IdentityAlreadySet => ErrCode::UNSPECIFIED,
-            MacVerificationFailed => ErrCode::UNSPECIFIED,
-            UnsupportedMethod => ErrCode::UNSPECIFIED,
-            UnsupportedCipherSuite => ErrCode::WRONG_SELECTED_CIPHER_SUITE,
-            ParsingError => ErrCode::UNSPECIFIED,
-            EncodingError => ErrCode::UNSPECIFIED,
-            CredentialTooLongError => ErrCode::UNSPECIFIED,
-            EadLabelTooLongError => ErrCode::UNSPECIFIED,
-            EadTooLongError => ErrCode::UNSPECIFIED,
-            EADUnprocessable => ErrCode::UNSPECIFIED,
-            AccessDenied => ErrCode::ACCESS_DENIED,
-        }
-    }
-}
-
-/// Representation of an EDHOC ERR_CODE
-#[repr(C)]
-pub struct ErrCode(pub NonZeroI16);
-
-impl ErrCode {
-    pub const UNSPECIFIED: Self = ErrCode(NonZeroI16::new(1).unwrap());
-    pub const WRONG_SELECTED_CIPHER_SUITE: Self = ErrCode(NonZeroI16::new(2).unwrap());
-    pub const UNKNOWN_CREDENTIAL: Self = ErrCode(NonZeroI16::new(3).unwrap());
-    // Code requested in https://datatracker.ietf.org/doc/html/draft-ietf-lake-authz
-    pub const ACCESS_DENIED: Self = ErrCode(NonZeroI16::new(3333).unwrap());
-}
-
 #[derive(Debug)]
 #[repr(C)]
 pub struct InitiatorStart {
@@ -659,7 +468,17 @@ pub type MessageBufferError = buffer::EdhocBufferError;
 /// An [`EdhocBuffer`] used for messages.
 pub type EdhocMessageBuffer = EdhocBuffer<MAX_MESSAGE_SIZE_LEN>;
 
+fn is_valid_ead_value(value: &[u8]) -> bool {
+    if value.is_empty() {
+        true
+    } else {
+        let mut decoder = CBORDecoder::new(value);
+        decoder.bytes().is_ok() && decoder.finished()
+    }
+}
+
 /// An owned EAD item.
+#[hax_lib::attributes]
 #[cfg_attr(feature = "python-bindings", pyclass(from_py_object))]
 #[derive(Clone, Debug)]
 pub struct EADItem {
@@ -670,6 +489,7 @@ pub struct EADItem {
     ///
     /// It is a type invariant that any data in here is either empty or contains exactly one CBOR
     /// item.
+    #[hax_lib::refine(is_valid_ead_value(value.as_slice()))]
     value: EADBuffer,
 }
 
@@ -709,6 +529,9 @@ impl EADItem {
             }
             value.extend_from_slice(value_bytes)?;
         };
+        if !is_valid_ead_value(value.as_slice()) {
+            return Err(EdhocBufferError::SliceTooLong);
+        }
 
         Ok(EADItem {
             label,
@@ -858,16 +681,37 @@ pub struct EadItems {
     items: [Option<EADItem>; MAX_EAD_ITEMS],
 }
 
+#[hax_lib::attributes]
+pub struct EadItemsIter<'a> {
+    items: &'a [Option<EADItem>; MAX_EAD_ITEMS],
+    #[hax_lib::refine(pos <= MAX_EAD_ITEMS)]
+    pos: usize,
+}
+
+impl<'a> Iterator for EadItemsIter<'a> {
+    type Item = &'a EADItem;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut result = None;
+        while self.pos < MAX_EAD_ITEMS && result.is_none() {
+            hax_lib::loop_decreases!(MAX_EAD_ITEMS - self.pos);
+            result = self.items[self.pos].as_ref();
+            self.pos += 1;
+        }
+        result
+    }
+}
+
 impl<'a> IntoIterator for &'a EadItems {
     type Item = &'a EADItem;
 
-    type IntoIter = core::iter::FilterMap<
-        core::slice::Iter<'a, Option<EADItem>>,
-        fn(&Option<EADItem>) -> Option<&EADItem>,
-    >;
+    type IntoIter = EadItemsIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter().filter_map(Option::as_ref)
+        EadItemsIter {
+            items: &self.items,
+            pos: 0,
+        }
     }
 }
 
@@ -889,7 +733,7 @@ impl EadItems {
         Err(item)
     }
 
-    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+    pub fn iter(&self) -> EadItemsIter<'_> {
         self.into_iter()
     }
 
@@ -898,8 +742,12 @@ impl EadItems {
     ///
     /// Call this whenever processing EAD items after all processable items have been removed.
     pub fn processed_critical_items(&self) -> Result<(), EDHOCError> {
-        if self.iter().any(|i| i.is_critical) {
-            return Err(EDHOCError::EADUnprocessable);
+        for i in 0..MAX_EAD_ITEMS {
+            if let Some(item) = &self.items[i] {
+                if item.is_critical {
+                    return Err(EDHOCError::EADUnprocessable);
+                }
+            }
         }
         Ok(())
     }
@@ -917,7 +765,14 @@ impl EadItems {
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
     // of tests that's not a meanginful question.
     pub fn len(&self) -> usize {
-        self.items.iter().filter(|x| x.is_some()).count()
+        let mut count = 0;
+        for i in 0..MAX_EAD_ITEMS {
+            hax_lib::loop_invariant!(|i: usize| count <= i);
+            if self.items[i].is_some() {
+                count += 1;
+            }
+        }
+        count
     }
 
     // This is frequently tested for, but maybe shouldn't wind up in the final API, because outside
@@ -944,6 +799,8 @@ mod helpers {
     use super::*;
 
     #[track_caller]
+    #[hax_lib::requires(context.len() <= MAX_KDF_CONTEXT_LEN && length < 256)]
+    #[hax_lib::ensures(|result| result.len() <= MAX_INFO_LEN)]
     pub fn encode_info(label: u8, context: &[u8], length: usize) -> BufferInfo {
         let mut info = BufferInfo::new();
 
@@ -984,24 +841,40 @@ mod helpers {
 // TODO: move to own file (or even to the main crate, once EAD is extracted as an external dependency)
 mod edhoc_parser {
     use super::*;
+    #[cfg(hax)]
+    use hax_lib::ToInt;
 
     pub fn parse_eads(buffer: &[u8]) -> Result<EadItems, EDHOCError> {
         let mut count = 0;
         let mut cursor = 0;
         let mut eads = EadItems::new();
 
+        let mut error = None;
         for _ in 0..MAX_EAD_ITEMS {
-            if !buffer[cursor..].is_empty() {
-                let (item, consumed) = parse_single_ead(&buffer[cursor..])?;
-                eads.items[count] = Some(item);
-                count += 1;
-                cursor += consumed;
+            hax_lib::loop_invariant!(|i: usize| count <= i && cursor <= buffer.len());
+            if error.is_none() && !buffer[cursor..].is_empty() {
+                match parse_single_ead(&buffer[cursor..]) {
+                    Ok((item, consumed)) => {
+                        eads.items[count] = Some(item);
+                        count += 1;
+                        cursor += consumed;
+                    }
+                    Err(e) => error = Some(e),
+                }
             }
         }
 
-        Ok(eads)
+        match error {
+            Some(e) => Err(e),
+            None => Ok(eads),
+        }
     }
 
+    #[hax_lib::fstar::options("--z3rlimit 40")]
+    #[hax_lib::ensures(|result| match result {
+        Ok((_, consumed)) => consumed <= input.len(),
+        Err(_) => true,
+    })]
     fn parse_single_ead(input: &[u8]) -> Result<(EADItem, usize), EDHOCError> {
         let mut decoder = CBORDecoder::new(input);
         let label = decoder
@@ -1009,9 +882,10 @@ mod edhoc_parser {
             .map_err(|_| EDHOCError::ParsingError)?;
 
         let is_critical = label < 0;
-        let label = label.abs();
+        let label = label.unsigned_abs();
 
         let position_after_label = decoder.position();
+        hax_lib::assert_prop!(position_after_label.to_int() <= input.len().to_int());
         let (ead_value, position) = if let Ok(_slice) = decoder.bytes() {
             // It's not just from `slice`, because EADItem::value is an *encoded* value. (FIXME: It
             // shouldn't be).
@@ -1026,6 +900,9 @@ mod edhoc_parser {
             // not being an integer.
             (EdhocBuffer::new(), position_after_label)
         };
+        if !is_valid_ead_value(ead_value.as_slice()) {
+            return Err(EDHOCError::ParsingError);
+        }
 
         let item = EADItem {
             label: label
@@ -1060,7 +937,7 @@ mod edhoc_parser {
                     .extend_reserve(received_suites_i_len)
                     .or(Err(EDHOCError::ParsingError))?;
                 #[allow(deprecated, reason = "hax complains about mutable references in loops")]
-                for i in write_range {
+                for i in write_range.start..write_range.end {
                     suites_i.content[i] = decoder.u8()?;
                 }
                 Ok((suites_i, decoder))
@@ -1379,8 +1256,7 @@ mod cbor_decoder {
         /// Decode a `u8` value.
         pub fn u8(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            // NOTE: thid could be a `match` with `n @ 0x00..=0x17` clauses but hax doesn't support it
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n)
             } else if 0x18 == n {
                 self.read()
@@ -1392,14 +1268,25 @@ mod cbor_decoder {
         /// Decode an `i8` value.
         pub fn i8(&mut self) -> Result<i8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) {
+            if n <= 0x17 {
                 Ok(n as i8)
-            } else if (0x20..=0x37).contains(&n) {
+            } else if n >= 0x20 && n <= 0x37 {
                 Ok(-1 - (n - 0x20) as i8)
             } else if 0x18 == n {
-                Ok(self.read()? as i8)
+                let b = self.read()?;
+                if b <= 127 {
+                    Ok(b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else if 0x38 == n {
-                Ok(-1 - (self.read()? - 0x20) as i8)
+                let b = self.read()?;
+                // -1 - b fits in i8 only when b <= 127 (result -128..-1)
+                if b <= 127 {
+                    Ok(-1 - b as i8)
+                } else {
+                    Err(CBORError::DecodingError)
+                }
             } else {
                 Err(CBORError::DecodingError)
             }
@@ -1409,9 +1296,12 @@ mod cbor_decoder {
         pub fn i32_limited(&mut self) -> Result<i32, CBORError> {
             let (major, argument) = self.read_major_argument16()?;
             match major {
-                CBOR_MAJOR_UNSIGNED => Ok(i32::from(argument)),
+                // u16 always fits in i32
+                CBOR_MAJOR_UNSIGNED => Ok(argument as i32),
                 // Can not underflow
-                CBOR_MAJOR_NEGATIVE => Ok(-1 - i32::from(argument)),
+                // argument as i32 is in 0..=65535, so -1 - argument is in -65536..=-1,
+                // so the subtraction never underflows for i32
+                CBOR_MAJOR_NEGATIVE => Ok(-1 - argument as i32),
                 _ => Err(CBORError::DecodingError),
             }
         }
@@ -1427,8 +1317,8 @@ mod cbor_decoder {
             let value = match info {
                 // Workaround-For: https://github.com/cryspen/hax/issues/925
                 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17
-                | 18 | 19 | 20 | 21 | 22 | 23 => info.into(),
-                24 => self.read()?.into(),
+                | 18 | 19 | 20 | 21 | 22 | 23 => info as u16,
+                24 => self.read()? as u16,
                 25 => u16::from_be_bytes([self.read()?, self.read()?]),
                 // We do not support those in this function.
                 26 | 27 => return Err(CBORError::DecodingError),
@@ -1446,7 +1336,7 @@ mod cbor_decoder {
         /// Get the raw `i8` or `u8` value.
         pub fn int_raw(&mut self) -> Result<u8, CBORError> {
             let n = self.read()?;
-            if (0..=0x17).contains(&n) || (0x20..=0x37).contains(&n) {
+            if n <= 0x17 || n >= 0x20 && n <= 0x37 {
                 Ok(n)
             } else {
                 Err(CBORError::DecodingError)
@@ -1517,14 +1407,14 @@ mod cbor_decoder {
         /// 16-bit form must carry a value above 255 (deterministic CBOR). The 32- and 64-bit forms
         /// (`0x1a`/`0x1b`) are rejected.
         pub fn as_usize(&mut self, b: u8) -> Result<usize, CBORError> {
-            if (0..=0x17).contains(&b) {
-                Ok(usize::from(b))
+            if b <= 0x17 {
+                Ok(b as usize)
             } else if 0x18 == b {
-                self.read().map(usize::from)
+                Ok(self.read()? as usize)
             } else if 0x19 == b {
                 let high = self.read()?;
                 let low = self.read()?;
-                let value = usize::from(u16::from_be_bytes([high, low]));
+                let value = u16::from_be_bytes([high, low]) as usize;
                 if value <= u8::MAX as usize {
                     return Err(CBORError::DecodingError); // deterministic CBOR
                 }
@@ -1541,7 +1431,7 @@ mod cbor_decoder {
 
         /// Get the additionl type info of the given byte (lowest 5 bits).
         pub fn info_of(b: u8) -> u8 {
-            b & 0b000_11111
+            b % 32
         }
 
         /// Check for: an unsigned integer encoded as a single byte
@@ -1589,7 +1479,7 @@ mod cbor_decoder {
                                 .ok_or(CBORError::DecodingError)?;
                         }
                         CBOR_MAJOR_BYTE_STRING | CBOR_MAJOR_TEXT_STRING => {
-                            self.read_slice(argument.into())?;
+                            self.read_slice(argument as usize)?;
                         }
                         CBOR_MAJOR_ARRAY => {
                             remaining_items = remaining_items
@@ -1607,7 +1497,11 @@ mod cbor_decoder {
                 }
             }
 
-            Ok(&self.buf[start..self.position()])
+            // FIXME: we can remove this .ok_or() if we add hax::attributes
+            // that guarantee that self.pos <= self.buf.len()
+            self.buf
+                .get(start..self.position())
+                .ok_or(CBORError::DecodingError)
         }
     }
 }
@@ -1627,6 +1521,38 @@ mod test_cbor_decoder {
         assert_eq!(-1, decoder.i8().unwrap());
         assert_eq!([0x68, 0x69], decoder.str().unwrap()); // "hi"
         assert_eq!([0xFE, 0xFE], decoder.bytes().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_positive() {
+        assert_eq!(24, CBORDecoder::new(&[0x18, 0x18]).i8().unwrap());
+        assert_eq!(127, CBORDecoder::new(&[0x18, 0x7F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_positive_out_of_range() {
+        assert!(CBORDecoder::new(&[0x18, 0x80]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x18, 0xC8]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x18, 0xFF]).i8().is_err());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative() {
+        assert_eq!(-25, CBORDecoder::new(&[0x38, 0x18]).i8().unwrap());
+        assert_eq!(-100, CBORDecoder::new(&[0x38, 0x63]).i8().unwrap());
+        assert_eq!(-128, CBORDecoder::new(&[0x38, 0x7F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative_small_argument() {
+        assert_eq!(-1, CBORDecoder::new(&[0x38, 0x00]).i8().unwrap());
+        assert_eq!(-32, CBORDecoder::new(&[0x38, 0x1F]).i8().unwrap());
+    }
+
+    #[test]
+    fn test_cbor_decoder_i8_two_byte_negative_out_of_range() {
+        assert!(CBORDecoder::new(&[0x38, 0x80]).i8().is_err());
+        assert!(CBORDecoder::new(&[0x38, 0xFF]).i8().is_err());
     }
 
     #[test]
@@ -1713,6 +1639,19 @@ mod test_ead_items {
         assert_eq!(ead1.label, 1);
 
         items.processed_critical_items().unwrap();
+    }
+
+    #[test]
+    fn test_parse_eads_negative_label_bounds() {
+        let decoded = edhoc_parser::parse_eads(&hex!("39fffe")).unwrap();
+        let item = decoded.iter().next().unwrap();
+        assert_eq!(item.label(), 0xffff);
+        assert!(item.is_critical());
+
+        assert_eq!(
+            edhoc_parser::parse_eads(&hex!("39ffff")).unwrap_err(),
+            EDHOCError::ParsingError
+        );
     }
 
     // Not introducing PartialEq/Eq just for this test, but if it's introduced later for other

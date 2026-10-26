@@ -55,15 +55,14 @@ pub enum EdhocBufferError {
 /// Trying to have an API as similar as possible to `heapless::Vec`,
 /// so that in the future it can be hot-swappable by the application.
 // NOTE: how would this const generic thing work across the C and Python bindings?
+#[hax_lib::attributes]
 #[derive(PartialEq, Debug, Clone)]
 #[repr(C)]
-// `#[hax_lib::attributes]` is not usable here due to https://github.com/cryspen/hax/issues/899
 pub struct EdhocBuffer<const N: usize> {
     #[deprecated]
     pub content: [u8; N],
     #[deprecated(note = "use .len()")]
-    // `#[hax_lib::refine(len <= N)]` would allow dropping all the other hax_lib requires lines on
-    // functions.
+    #[hax_lib::refine(len <= N)]
     len: usize,
 }
 
@@ -136,7 +135,6 @@ impl<const N: usize> EdhocBuffer<N> {
         }
     }
 
-    #[hax_lib::requires(self.len <= N)]
     pub fn contains(&self, item: &u8) -> bool {
         self.as_slice().contains(item)
     }
@@ -152,7 +150,6 @@ impl<const N: usize> EdhocBuffer<N> {
         }
     }
 
-    #[hax_lib::requires(self.len <= N)]
     pub fn get_slice(&self, start: usize, len: usize) -> Option<&[u8]> {
         // The strict criterion avoids the need to use checked / saturating addition, which is not
         // present in hax for usize.
@@ -168,7 +165,6 @@ impl<const N: usize> EdhocBuffer<N> {
     }
 
     #[inline]
-    #[hax_lib::requires(self.len <= N)]
     pub fn as_slice(&self) -> &[u8] {
         &self.content[0..self.len]
     }
@@ -211,6 +207,10 @@ impl<const N: usize> EdhocBuffer<N> {
     /// This is not a fully idiomatic Rust API: Preferably, this would return a `&mut [u8]` of the
     /// requested length. However, as `.as_mut_slice()` or `.get_mut()` can not be checked by hax,
     /// pushing and getting a range is the next best thing.
+    #[hax_lib::ensures(|result| match result {
+        Ok(range) => range.end <= N,
+        Err(_) => true,
+    })]
     pub fn extend_reserve(
         &mut self,
         length: usize,
@@ -236,7 +236,7 @@ impl<const N: usize> EdhocBuffer<N> {
 impl<const N: usize> Index<usize> for EdhocBuffer<N> {
     type Output = u8;
     #[track_caller]
-    #[hax_lib::requires(item < self.len && self.len <= N)]
+    #[hax_lib::requires(item < self.len)]
     fn index(&self, item: usize) -> &Self::Output {
         &self.as_slice()[item]
     }
