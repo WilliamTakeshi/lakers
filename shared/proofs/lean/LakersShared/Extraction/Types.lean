@@ -26,7 +26,7 @@ set_option maxRecDepth 2048
 namespace lakers_shared
 
 /-- [lakers_shared::buffer::LakeBufferError]
-    Source: 'shared/src/buffer.rs', lines 24:0-28:1
+    Source: 'shared/src/buffer.rs', lines 25:0-29:1
     Visibility: public -/
 @[discriminant isize]
 inductive buffer.LakeBufferError where
@@ -35,7 +35,7 @@ inductive buffer.LakeBufferError where
 | SliceTooShort : buffer.LakeBufferError
 
 /-- [lakers_shared::buffer::LakeBuffer]
-    Source: 'shared/src/buffer.rs', lines 37:0-42:1
+    Source: 'shared/src/buffer.rs', lines 38:0-43:1
     Visibility: public -/
 structure buffer.LakeBuffer (N : Std.Usize) where
   content : Array Std.U8 N

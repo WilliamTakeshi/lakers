@@ -10,8 +10,9 @@ pub const MAX_SUITES_LEN: usize = 9;
 // or to NULL is UB in C where the memcpy comes from).
 /// Copies a short slice into the start of a long slice.
 #[inline(always)]
+#[hax_lib::requires(short.len() <= long.len())]
+#[hax_lib::ensures(|_| true)]
 const fn copy_into_longer(long: &mut [u8], short: &[u8]) {
-    assert!(short.len() <= long.len());
     let mut cursor = short.len();
     while cursor > 0 {
         cursor = cursor - 1;

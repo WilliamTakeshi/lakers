@@ -35,7 +35,7 @@ namespace lakers_shared
 @[global_simps, irreducible] def buffer.MAX_SUITES_LEN : Std.Usize := 9#usize
 
 /-- [lakers_shared::buffer::copy_into_longer]: loop body 0:
-    Source: 'shared/src/buffer.rs', lines 16:4-19:5 -/
+    Source: 'shared/src/buffer.rs', lines 17:4-20:5 -/
 @[rust_loop_body]
 def buffer.copy_into_longer_loop.body
   (short : Slice Std.U8) (long : Slice Std.U8) (cursor : Std.Usize) :
@@ -50,7 +50,7 @@ def buffer.copy_into_longer_loop.body
   else ok (done long)
 
 /-- [lakers_shared::buffer::copy_into_longer]: loop 0:
-    Source: 'shared/src/buffer.rs', lines 16:4-19:5 -/
+    Source: 'shared/src/buffer.rs', lines 17:4-20:5 -/
 @[rust_loop]
 def buffer.copy_into_longer_loop
   (long : Slice Std.U8) (short : Slice Std.U8) (cursor : Std.Usize) :
@@ -62,23 +62,21 @@ def buffer.copy_into_longer_loop
     (long, cursor)
 
 /-- [lakers_shared::buffer::copy_into_longer]:
-    Source: 'shared/src/buffer.rs', lines 13:0-20:1 -/
+    Source: 'shared/src/buffer.rs', lines 15:0-21:1 -/
 def buffer.copy_into_longer
   (long : Slice Std.U8) (short : Slice Std.U8) : RustM (Slice Std.U8) := do
-  let i ← core.slice.Slice.len short
-  let i1 ← core.slice.Slice.len long
-  massert (i <= i1)
-  buffer.copy_into_longer_loop long short i
+  let cursor ← core.slice.Slice.len short
+  buffer.copy_into_longer_loop long short cursor
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::marker::StructuralPartialEq for lakers_shared::buffer::LakeBufferError}]
-    Source: 'shared/src/buffer.rs', lines 22:9-22:18 -/
+    Source: 'shared/src/buffer.rs', lines 23:9-23:18 -/
 @[reducible]
 def buffer.LakeBufferError.Insts.CoreMarkerStructuralPartialEq :
   core.marker.StructuralPartialEq buffer.LakeBufferError := {
 }
 
 /-- [lakers_shared::buffer::{impl core::cmp::PartialEq<lakers_shared::buffer::LakeBufferError> for lakers_shared::buffer::LakeBufferError}::eq]:
-    Source: 'shared/src/buffer.rs', lines 22:9-22:18
+    Source: 'shared/src/buffer.rs', lines 23:9-23:18
     Visibility: public -/
 def buffer.LakeBufferError.Insts.CoreCmpPartialEqLakeBufferError.eq
   (self : buffer.LakeBufferError) (other : buffer.LakeBufferError) :
@@ -89,7 +87,7 @@ def buffer.LakeBufferError.Insts.CoreCmpPartialEqLakeBufferError.eq
   ok (self1 = other1)
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::cmp::PartialEq<lakers_shared::buffer::LakeBufferError> for lakers_shared::buffer::LakeBufferError}]
-    Source: 'shared/src/buffer.rs', lines 22:9-22:18 -/
+    Source: 'shared/src/buffer.rs', lines 23:9-23:18 -/
 @[reducible]
 impl_def buffer.LakeBufferError.Insts.CoreCmpPartialEqLakeBufferError :
   core.cmp.PartialEq buffer.LakeBufferError buffer.LakeBufferError := {
@@ -99,14 +97,14 @@ impl_def buffer.LakeBufferError.Insts.CoreCmpPartialEqLakeBufferError :
 }
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::marker::StructuralPartialEq for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 35:9-35:18 -/
+    Source: 'shared/src/buffer.rs', lines 36:9-36:18 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreMarkerStructuralPartialEq (N : Std.Usize) :
   core.marker.StructuralPartialEq (buffer.LakeBuffer N) := {
 }
 
 /-- [lakers_shared::buffer::{impl core::cmp::PartialEq<lakers_shared::buffer::LakeBuffer<N>> for lakers_shared::buffer::LakeBuffer<N>}::eq]:
-    Source: 'shared/src/buffer.rs', lines 35:9-35:18
+    Source: 'shared/src/buffer.rs', lines 36:9-36:18
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreCmpPartialEqLakeBuffer.eq
   {N : Std.Usize} (self : buffer.LakeBuffer N) (other : buffer.LakeBuffer N) :
@@ -120,7 +118,7 @@ def buffer.LakeBuffer.Insts.CoreCmpPartialEqLakeBuffer.eq
   else ok false
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::cmp::PartialEq<lakers_shared::buffer::LakeBuffer<N>> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 35:9-35:18 -/
+    Source: 'shared/src/buffer.rs', lines 36:9-36:18 -/
 @[reducible]
 impl_def buffer.LakeBuffer.Insts.CoreCmpPartialEqLakeBuffer (N : Std.Usize) :
   core.cmp.PartialEq (buffer.LakeBuffer N) (buffer.LakeBuffer N) := {
@@ -130,7 +128,7 @@ impl_def buffer.LakeBuffer.Insts.CoreCmpPartialEqLakeBuffer (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::clone::Clone for lakers_shared::buffer::LakeBuffer<N>}::clone]:
-    Source: 'shared/src/buffer.rs', lines 35:27-35:32
+    Source: 'shared/src/buffer.rs', lines 36:27-36:32
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreCloneClone.clone
   {N : Std.Usize} (self : buffer.LakeBuffer N) :
@@ -143,7 +141,7 @@ def buffer.LakeBuffer.Insts.CoreCloneClone.clone
   ok { content := a, len := i }
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::clone::Clone for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 35:27-35:32 -/
+    Source: 'shared/src/buffer.rs', lines 36:27-36:32 -/
 @[reducible]
 impl_def buffer.LakeBuffer.Insts.CoreCloneClone (N : Std.Usize) :
   core.clone.Clone (buffer.LakeBuffer N) := {
@@ -153,7 +151,7 @@ impl_def buffer.LakeBuffer.Insts.CoreCloneClone (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::default::Default for lakers_shared::buffer::LakeBuffer<N>}::default]:
-    Source: 'shared/src/buffer.rs', lines 46:4-51:5
+    Source: 'shared/src/buffer.rs', lines 47:4-52:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreDefaultDefault.default
   (N : Std.Usize) : RustM (buffer.LakeBuffer N) := do
@@ -161,7 +159,7 @@ def buffer.LakeBuffer.Insts.CoreDefaultDefault.default
   ok { content := a, len := 0#usize }
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::default::Default for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 45:0-52:1 -/
+    Source: 'shared/src/buffer.rs', lines 46:0-53:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreDefaultDefault (N : Std.Usize) :
   core.default.Default (buffer.LakeBuffer N) := {
@@ -169,28 +167,28 @@ def buffer.LakeBuffer.Insts.CoreDefaultDefault (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new]:
-    Source: 'shared/src/buffer.rs', lines 56:4-61:5
+    Source: 'shared/src/buffer.rs', lines 57:4-62:5
     Visibility: public -/
 def buffer.LakeBuffer.new (N : Std.Usize) : RustM (buffer.LakeBuffer N) := do
   let a ← core.array.repeat N core.U8.Insts.CoreCloneClone 0#u8
   ok { content := a, len := 0#usize }
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::len]:
-    Source: 'shared/src/buffer.rs', lines 63:4-65:5
+    Source: 'shared/src/buffer.rs', lines 64:4-66:5
     Visibility: public -/
 def buffer.LakeBuffer.impl.len
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM Std.Usize := do
   ok self.len
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::capacity]:
-    Source: 'shared/src/buffer.rs', lines 67:4-69:5
+    Source: 'shared/src/buffer.rs', lines 68:4-70:5
     Visibility: public -/
 def buffer.LakeBuffer.capacity
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM Std.Usize := do
   ok N
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::fill_with_slice]:
-    Source: 'shared/src/buffer.rs', lines 142:4-150:5
+    Source: 'shared/src/buffer.rs', lines 143:4-151:5
     Visibility: public -/
 def buffer.LakeBuffer.fill_with_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -209,7 +207,7 @@ def buffer.LakeBuffer.fill_with_slice
   else ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_slice]:
-    Source: 'shared/src/buffer.rs', lines 71:4-78:5
+    Source: 'shared/src/buffer.rs', lines 72:4-79:5
     Visibility: public -/
 def buffer.LakeBuffer.new_from_slice
   (N : Std.Usize) (slice : Slice Std.U8) :
@@ -223,7 +221,7 @@ def buffer.LakeBuffer.new_from_slice
   else ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_array]:
-    Source: 'shared/src/buffer.rs', lines 98:4-108:5
+    Source: 'shared/src/buffer.rs', lines 99:4-109:5
     Visibility: public -/
 def buffer.LakeBuffer.new_from_array
   (N : Std.Usize) {AN : Std.Usize} (input : Array Std.U8 AN) :
@@ -237,7 +235,7 @@ def buffer.LakeBuffer.new_from_array
   | core.result.Result.Err _ => fail panic
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::as_slice]:
-    Source: 'shared/src/buffer.rs', lines 138:4-140:5
+    Source: 'shared/src/buffer.rs', lines 139:4-141:5
     Visibility: public -/
 def buffer.LakeBuffer.as_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM (Slice Std.U8) := do
@@ -246,7 +244,7 @@ def buffer.LakeBuffer.as_slice
     Std.U8)) self.content { start := 0#usize, «end» := self.len }
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::contains]:
-    Source: 'shared/src/buffer.rs', lines 110:4-112:5
+    Source: 'shared/src/buffer.rs', lines 111:4-113:5
     Visibility: public -/
 def buffer.LakeBuffer.contains
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.U8) :
@@ -256,7 +254,7 @@ def buffer.LakeBuffer.contains
   core.slice.Slice.contains core.U8.Insts.CoreCmpPartialEqU8 s item
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::push]:
-    Source: 'shared/src/buffer.rs', lines 115:4-123:5
+    Source: 'shared/src/buffer.rs', lines 116:4-124:5
     Visibility: public -/
 def buffer.LakeBuffer.push
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.U8) :
@@ -274,7 +272,7 @@ def buffer.LakeBuffer.push
     ok (core.result.Result.Err buffer.LakeBufferError.BufferAlreadyFull, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::get_slice]:
-    Source: 'shared/src/buffer.rs', lines 125:4-135:5
+    Source: 'shared/src/buffer.rs', lines 126:4-136:5
     Visibility: public -/
 def buffer.LakeBuffer.get_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (start : Std.Usize)
@@ -300,7 +298,7 @@ def buffer.LakeBuffer.get_slice
         ok (core.option.Option.Some s)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_from_slice]:
-    Source: 'shared/src/buffer.rs', lines 153:4-165:5
+    Source: 'shared/src/buffer.rs', lines 154:4-166:5
     Visibility: public -/
 def buffer.LakeBuffer.extend_from_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -336,7 +334,7 @@ def buffer.LakeBuffer.extend_from_slice
         ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_reserve]:
-    Source: 'shared/src/buffer.rs', lines 176:4-191:5
+    Source: 'shared/src/buffer.rs', lines 177:4-192:5
     Visibility: public -/
 def buffer.LakeBuffer.extend_reserve
   {N : Std.Usize} (self : buffer.LakeBuffer N) (length : Std.Usize) :
@@ -360,7 +358,7 @@ def buffer.LakeBuffer.extend_reserve
           self)
 
 /-- [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}::index]:
-    Source: 'shared/src/buffer.rs', lines 198:4-200:5
+    Source: 'shared/src/buffer.rs', lines 199:4-201:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.Usize) :
@@ -370,7 +368,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   Slice.index_usize s item
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 195:0-201:1 -/
+    Source: 'shared/src/buffer.rs', lines 196:0-202:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
   core.ops.index.Index (buffer.LakeBuffer N) Std.Usize Std.U8 := {
@@ -378,7 +376,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}::try_from]:
-    Source: 'shared/src/buffer.rs', lines 207:4-219:5
+    Source: 'shared/src/buffer.rs', lines 208:4-220:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   (N : Std.Usize) (input : Slice Std.U8) :
@@ -402,7 +400,7 @@ def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   else ok (core.result.Result.Err ())
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 204:0-220:1 -/
+    Source: 'shared/src/buffer.rs', lines 205:0-221:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple (N :
   Std.Usize) : core.convert.TryFrom (buffer.LakeBuffer N) (Slice Std.U8) Unit
