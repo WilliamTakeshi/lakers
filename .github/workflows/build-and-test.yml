@@ -81,6 +81,57 @@ jobs:
     - name: Build
       run: cargo build --package lakers --package lakers-crypto --package lakers-ead-authz --no-default-features --features="${{ matrix.crypto_backend }}" --release
 
+  generate-lean-proofs:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout lakers
+      uses: actions/checkout@v4
+
+    - name: Install cargo-hax (prebuilt)
+      id: hax-prebuilt
+      continue-on-error: true
+      run: |
+        tmp=$(mktemp -d)
+        curl -sSfL -o "$tmp/cargo-hax.tar.zst" \
+          https://github.com/cryspen/hax/releases/download/cargo-hax-v0.5.0/cargo-hax-x86_64-unknown-linux-gnu.tar.zst
+        echo "c638e631adee70b19c79bf84203e712e2da9233f85df223afc56e66042a24374  $tmp/cargo-hax.tar.zst" | sha256sum -c
+        tar --zstd -xf "$tmp/cargo-hax.tar.zst" -C "$tmp"
+        "$tmp/cargo-hax" hax --version
+        mv "$tmp/cargo-hax" ~/.cargo/bin/
+
+    - name: Install cargo-hax (build from source, fallback)
+      if: steps.hax-prebuilt.outcome == 'failure'
+      uses: hacspec/hax-actions@main
+      with:
+        hax_reference: "a045d15a3bf43fe05096146f488668b521a4ae44"
+
+    - name: Check cargo-hax
+      run: |
+        if [ "${{ steps.hax-prebuilt.outcome }}" = failure ]; then
+          echo "::warning::prebuilt cargo-hax failed, built from source instead"
+        fi
+        cargo hax --version
+
+    - name: Extract lakers-shared into Lean
+      run: |
+        cargo hax -C --manifest-path shared/Cargo.toml \; into lean --charon-args="--start-from crate::buffer"
+
+    - name: Check the committed extraction is up to date
+      run: |
+        git status --porcelain shared/proofs/lean
+        git diff --exit-code shared/proofs/lean
+        test -z "$(git status --porcelain shared/proofs/lean)"
+
+    - name: Build the Lean proofs
+      uses: leanprover/lean-action@v1
+      with:
+        lake-package-directory: shared/proofs/lean
+        build-args: "--wfail"
+
+    - name: Check every proof obligation is proven
+      run: shared/proofs/lean/check-obligations.sh
+  
   build-lakers-c:
     needs: unit-tests
     runs-on: ubuntu-24.04
