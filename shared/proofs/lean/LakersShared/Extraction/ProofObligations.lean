@@ -61,4 +61,21 @@ theorem buffer.LakeBuffer.capacity.spec.proof {N : Std.Usize}
   (self : buffer.LakeBuffer N) : buffer.LakeBuffer.capacity.spec self
   := by sorry
 
+@[spec]
+theorem buffer.LakeBuffer.contains.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.U8) :
+  buffer.LakeBuffer.contains.spec self item
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.get_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (start : Std.Usize) (len : Std.Usize) :
+  buffer.LakeBuffer.get_slice.spec self start len
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.as_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : buffer.LakeBuffer.as_slice.spec self
+  := by sorry
+
 end lakers_shared

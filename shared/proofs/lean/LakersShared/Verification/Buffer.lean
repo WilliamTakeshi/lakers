@@ -153,4 +153,41 @@ theorem buffer.LakeBuffer.capacity.spec.proof {N : Std.Usize}
   unfold buffer.LakeBuffer.capacity.spec buffer.LakeBuffer.capacity
   hax_mvcgen
 
+theorem buffer.LakeBuffer.as_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : buffer.LakeBuffer.as_slice.spec self
+  := by
+  unfold buffer.LakeBuffer.as_slice.spec buffer.LakeBuffer.as_slice
+  hax_mvcgen [buffer.LakeBuffer.invariant,
+    core.Array.Insts.CoreOpsIndexIndex.index, core.Slice.Insts.CoreOpsIndexIndex.index,
+    core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get]
+  all_goals grind
+
+@[spec]
+theorem buffer.LakeBuffer.as_slice.triple {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (h : self.len.val ≤ N.val) :
+  ⦃ ⌜ True ⌝ ⦄ buffer.LakeBuffer.as_slice self
+  ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.as_slice.post self res).holds ⌝ ⦄
+  := by
+  apply buffer.LakeBuffer.as_slice.spec.proof self
+  hax_mvcgen [buffer.LakeBuffer.invariant]
+  grind
+
+theorem buffer.LakeBuffer.contains.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.U8) :
+  buffer.LakeBuffer.contains.spec self item
+  := by
+  unfold buffer.LakeBuffer.contains.spec buffer.LakeBuffer.contains
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.contains]
+  all_goals grind
+
+theorem buffer.LakeBuffer.get_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (start : Std.Usize) (len : Std.Usize) :
+  buffer.LakeBuffer.get_slice.spec self start len
+  := by
+  unfold buffer.LakeBuffer.get_slice.spec buffer.LakeBuffer.get_slice
+  hax_mvcgen [buffer.LakeBuffer.invariant,
+    core.Array.Insts.CoreOpsIndexIndex.index, core.Slice.Insts.CoreOpsIndexIndex.index,
+    core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get]
+  all_goals grind
+
 end lakers_shared

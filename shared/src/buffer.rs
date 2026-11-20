@@ -119,6 +119,8 @@ impl<const N: usize> LakeBuffer<N> {
         }
     }
 
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| true)]
     pub fn contains(&self, item: &u8) -> bool {
         self.as_slice().contains(item)
     }
@@ -134,6 +136,8 @@ impl<const N: usize> LakeBuffer<N> {
         }
     }
 
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| true)]
     pub fn get_slice(&self, start: usize, len: usize) -> Option<&[u8]> {
         if start >= usize::MAX / 2 || len >= usize::MAX / 2 {
             return None;
@@ -147,6 +151,8 @@ impl<const N: usize> LakeBuffer<N> {
     }
 
     #[inline]
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| true)]
     pub fn as_slice(&self) -> &[u8] {
         &self.content[0..self.len]
     }
