@@ -151,7 +151,7 @@ impl_def buffer.LakeBuffer.Insts.CoreCloneClone (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::default::Default for lakers_shared::buffer::LakeBuffer<N>}::default]:
-    Source: 'shared/src/buffer.rs', lines 47:4-52:5
+    Source: 'shared/src/buffer.rs', lines 49:4-54:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreDefaultDefault.default
   (N : Std.Usize) : RustM (buffer.LakeBuffer N) := do
@@ -159,36 +159,43 @@ def buffer.LakeBuffer.Insts.CoreDefaultDefault.default
   ok { content := a, len := 0#usize }
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::default::Default for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 46:0-53:1 -/
+    Source: 'shared/src/buffer.rs', lines 47:0-55:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreDefaultDefault (N : Std.Usize) :
   core.default.Default (buffer.LakeBuffer N) := {
   default := buffer.LakeBuffer.Insts.CoreDefaultDefault.default N
 }
 
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::invariant]:
+    Source: 'shared/src/buffer.rs', lines 69:4-71:5
+    Visibility: public -/
+def buffer.LakeBuffer.invariant
+  {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM Bool := do
+  ok (self.len <= N)
+
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new]:
-    Source: 'shared/src/buffer.rs', lines 57:4-62:5
+    Source: 'shared/src/buffer.rs', lines 61:4-66:5
     Visibility: public -/
 def buffer.LakeBuffer.new (N : Std.Usize) : RustM (buffer.LakeBuffer N) := do
   let a ← core.array.repeat N core.U8.Insts.CoreCloneClone 0#u8
   ok { content := a, len := 0#usize }
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::len]:
-    Source: 'shared/src/buffer.rs', lines 64:4-66:5
+    Source: 'shared/src/buffer.rs', lines 74:4-76:5
     Visibility: public -/
 def buffer.LakeBuffer.impl.len
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM Std.Usize := do
   ok self.len
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::capacity]:
-    Source: 'shared/src/buffer.rs', lines 68:4-70:5
+    Source: 'shared/src/buffer.rs', lines 79:4-81:5
     Visibility: public -/
 def buffer.LakeBuffer.capacity
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM Std.Usize := do
   ok N
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::fill_with_slice]:
-    Source: 'shared/src/buffer.rs', lines 143:4-151:5
+    Source: 'shared/src/buffer.rs', lines 154:4-162:5
     Visibility: public -/
 def buffer.LakeBuffer.fill_with_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -207,7 +214,7 @@ def buffer.LakeBuffer.fill_with_slice
   else ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_slice]:
-    Source: 'shared/src/buffer.rs', lines 72:4-79:5
+    Source: 'shared/src/buffer.rs', lines 83:4-90:5
     Visibility: public -/
 def buffer.LakeBuffer.new_from_slice
   (N : Std.Usize) (slice : Slice Std.U8) :
@@ -221,7 +228,7 @@ def buffer.LakeBuffer.new_from_slice
   else ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_array]:
-    Source: 'shared/src/buffer.rs', lines 99:4-109:5
+    Source: 'shared/src/buffer.rs', lines 110:4-120:5
     Visibility: public -/
 def buffer.LakeBuffer.new_from_array
   (N : Std.Usize) {AN : Std.Usize} (input : Array Std.U8 AN) :
@@ -235,7 +242,7 @@ def buffer.LakeBuffer.new_from_array
   | core.result.Result.Err _ => fail panic
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::as_slice]:
-    Source: 'shared/src/buffer.rs', lines 139:4-141:5
+    Source: 'shared/src/buffer.rs', lines 150:4-152:5
     Visibility: public -/
 def buffer.LakeBuffer.as_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) : RustM (Slice Std.U8) := do
@@ -244,7 +251,7 @@ def buffer.LakeBuffer.as_slice
     Std.U8)) self.content { start := 0#usize, «end» := self.len }
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::contains]:
-    Source: 'shared/src/buffer.rs', lines 111:4-113:5
+    Source: 'shared/src/buffer.rs', lines 122:4-124:5
     Visibility: public -/
 def buffer.LakeBuffer.contains
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.U8) :
@@ -254,7 +261,7 @@ def buffer.LakeBuffer.contains
   core.slice.Slice.contains core.U8.Insts.CoreCmpPartialEqU8 s item
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::push]:
-    Source: 'shared/src/buffer.rs', lines 116:4-124:5
+    Source: 'shared/src/buffer.rs', lines 127:4-135:5
     Visibility: public -/
 def buffer.LakeBuffer.push
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.U8) :
@@ -272,7 +279,7 @@ def buffer.LakeBuffer.push
     ok (core.result.Result.Err buffer.LakeBufferError.BufferAlreadyFull, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::get_slice]:
-    Source: 'shared/src/buffer.rs', lines 126:4-136:5
+    Source: 'shared/src/buffer.rs', lines 137:4-147:5
     Visibility: public -/
 def buffer.LakeBuffer.get_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (start : Std.Usize)
@@ -298,7 +305,7 @@ def buffer.LakeBuffer.get_slice
         ok (core.option.Option.Some s)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_from_slice]:
-    Source: 'shared/src/buffer.rs', lines 154:4-166:5
+    Source: 'shared/src/buffer.rs', lines 165:4-177:5
     Visibility: public -/
 def buffer.LakeBuffer.extend_from_slice
   {N : Std.Usize} (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -334,7 +341,7 @@ def buffer.LakeBuffer.extend_from_slice
         ok (core.result.Result.Err buffer.LakeBufferError.SliceTooLong, self)
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_reserve]:
-    Source: 'shared/src/buffer.rs', lines 177:4-192:5
+    Source: 'shared/src/buffer.rs', lines 188:4-203:5
     Visibility: public -/
 def buffer.LakeBuffer.extend_reserve
   {N : Std.Usize} (self : buffer.LakeBuffer N) (length : Std.Usize) :
@@ -358,7 +365,7 @@ def buffer.LakeBuffer.extend_reserve
           self)
 
 /-- [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}::index]:
-    Source: 'shared/src/buffer.rs', lines 199:4-201:5
+    Source: 'shared/src/buffer.rs', lines 210:4-212:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.Usize) :
@@ -368,7 +375,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   Slice.index_usize s item
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 196:0-202:1 -/
+    Source: 'shared/src/buffer.rs', lines 207:0-213:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
   core.ops.index.Index (buffer.LakeBuffer N) Std.Usize Std.U8 := {
@@ -376,7 +383,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}::try_from]:
-    Source: 'shared/src/buffer.rs', lines 208:4-220:5
+    Source: 'shared/src/buffer.rs', lines 219:4-231:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   (N : Std.Usize) (input : Slice Std.U8) :
@@ -400,7 +407,7 @@ def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   else ok (core.result.Result.Err ())
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 205:0-221:1 -/
+    Source: 'shared/src/buffer.rs', lines 216:0-232:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple (N :
   Std.Usize) : core.convert.TryFrom (buffer.LakeBuffer N) (Slice Std.U8) Unit

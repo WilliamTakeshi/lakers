@@ -43,7 +43,9 @@ pub struct LakeBuffer<const N: usize> {
 }
 
 #[allow(deprecated)]
+#[hax_lib::attributes]
 impl<const N: usize> Default for LakeBuffer<N> {
+    #[hax_lib::ensures(|buf| buf.invariant())]
     fn default() -> Self {
         LakeBuffer {
             content: [0; N],
@@ -53,7 +55,9 @@ impl<const N: usize> Default for LakeBuffer<N> {
 }
 
 #[allow(deprecated)]
+#[hax_lib::attributes]
 impl<const N: usize> LakeBuffer<N> {
+    #[hax_lib::ensures(|buf| buf.invariant())]
     pub const fn new() -> Self {
         LakeBuffer {
             content: [0u8; N],
@@ -61,10 +65,17 @@ impl<const N: usize> LakeBuffer<N> {
         }
     }
 
+    #[hax_lib::ensures(|_| true)]
+    pub const fn invariant(&self) -> bool {
+        self.len <= N
+    }
+
+    #[hax_lib::ensures(|_| true)]
     pub const fn len(&self) -> usize {
         self.len
     }
 
+    #[hax_lib::ensures(|_| true)]
     pub const fn capacity(&self) -> usize {
         N
     }

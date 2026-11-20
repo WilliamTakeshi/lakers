@@ -35,4 +35,30 @@ theorem buffer.copy_into_longer.spec.proof (long : Slice Std.U8)
   (short : Slice Std.U8) : buffer.copy_into_longer.spec long short
   := by sorry
 
+@[spec]
+theorem
+  buffer.LakeBuffer.Insts.CoreDefaultDefault.default.spec.proof (N : Std.Usize)
+  : buffer.LakeBuffer.Insts.CoreDefaultDefault.default.spec N
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.new.spec.proof (N : Std.Usize) :
+  buffer.LakeBuffer.new.spec N
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.invariant.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : buffer.LakeBuffer.invariant.spec self
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.impl.len.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : buffer.LakeBuffer.impl.len.spec self
+  := by sorry
+
+@[spec]
+theorem buffer.LakeBuffer.capacity.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : buffer.LakeBuffer.capacity.spec self
+  := by sorry
+
 end lakers_shared

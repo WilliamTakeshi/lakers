@@ -57,4 +57,77 @@ def buffer.copy_into_longer.spec (long : Slice Std.U8) (short : Slice Std.U8)
   ⦃ ⇓ res => ⌜ (buffer.copy_into_longer.post long short res).holds ⌝
   ⦄
 
+
+/-- [lakers_shared::buffer::{impl core::default::Default for lakers_shared::buffer::LakeBuffer<N>}::default::post]:
+    Source: 'shared/src/buffer.rs', lines 48:4-48:46 -/
+@[reducible]
+def buffer.DefaultLakeBuffer.default.post
+  {N : Std.Usize} (buf : buffer.LakeBuffer N) : RustM Bool := do
+  buffer.LakeBuffer.invariant buf
+
+def buffer.LakeBuffer.Insts.CoreDefaultDefault.default.spec (N : Std.Usize)
+  : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.Insts.CoreDefaultDefault.default N
+  ⦃ ⇓ res => ⌜ (buffer.DefaultLakeBuffer.default.post res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new::post]:
+    Source: 'shared/src/buffer.rs', lines 60:4-60:46 -/
+@[reducible]
+def buffer.LakeBuffer.new.post
+  {N : Std.Usize} (buf : buffer.LakeBuffer N) : RustM Bool := do
+  buffer.LakeBuffer.invariant buf
+
+def buffer.LakeBuffer.new.spec (N : Std.Usize) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.new N
+  ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.new.post res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::invariant::post]:
+    Source: 'shared/src/buffer.rs', lines 68:4-68:33 -/
+@[reducible]
+def buffer.LakeBuffer.invariant.post
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (b : Bool) : RustM Bool := do
+  ok true
+
+def buffer.LakeBuffer.invariant.spec {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.invariant self
+  ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.invariant.post self res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::len::post]:
+    Source: 'shared/src/buffer.rs', lines 73:4-73:33 -/
+@[reducible]
+def buffer.LakeBuffer.len.post
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (i : Std.Usize) :
+  RustM Bool
+  := do
+  ok true
+
+def buffer.LakeBuffer.impl.len.spec {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.impl.len self
+  ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.len.post self res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::capacity::post]:
+    Source: 'shared/src/buffer.rs', lines 78:4-78:33 -/
+@[reducible]
+def buffer.LakeBuffer.capacity.post
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (i : Std.Usize) :
+  RustM Bool
+  := do
+  ok true
+
+def buffer.LakeBuffer.capacity.spec {N : Std.Usize}
+  (self : buffer.LakeBuffer N) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.capacity self
+  ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.capacity.post self res).holds ⌝ ⦄
+
 end lakers_shared
