@@ -365,7 +365,7 @@ def buffer.LakeBuffer.extend_reserve
           self)
 
 /-- [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}::index]:
-    Source: 'shared/src/buffer.rs', lines 230:4-232:5
+    Source: 'shared/src/buffer.rs', lines 233:4-235:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   {N : Std.Usize} (self : buffer.LakeBuffer N) (item : Std.Usize) :
@@ -375,7 +375,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
   Slice.index_usize s item
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 227:0-233:1 -/
+    Source: 'shared/src/buffer.rs', lines 228:0-236:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
   core.ops.index.Index (buffer.LakeBuffer N) Std.Usize Std.U8 := {
@@ -383,7 +383,7 @@ def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8 (N : Std.Usize) :
 }
 
 /-- [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}::try_from]:
-    Source: 'shared/src/buffer.rs', lines 239:4-251:5
+    Source: 'shared/src/buffer.rs', lines 247:4-259:5
     Visibility: public -/
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   (N : Std.Usize) (input : Slice Std.U8) :
@@ -407,7 +407,7 @@ def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
   else ok (core.result.Result.Err ())
 
 /-- Trait implementation: [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}]
-    Source: 'shared/src/buffer.rs', lines 236:0-252:1 -/
+    Source: 'shared/src/buffer.rs', lines 240:0-260:1 -/
 @[reducible]
 def buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple (N :
   Std.Usize) : core.convert.TryFrom (buffer.LakeBuffer N) (Slice Std.U8) Unit

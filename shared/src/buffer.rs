@@ -160,7 +160,7 @@ impl<const N: usize> LakeBuffer<N> {
 
     #[inline]
     #[hax_lib::requires(self.invariant())]
-    #[hax_lib::ensures(|_| true)]
+    #[hax_lib::ensures(|s| s.len() == self.len)]
     pub fn as_slice(&self) -> &[u8] {
         &self.content[0..self.len]
     }
@@ -224,18 +224,26 @@ impl<const N: usize> LakeBuffer<N> {
 }
 
 #[allow(deprecated)]
+#[hax_lib::attributes]
 impl<const N: usize> Index<usize> for LakeBuffer<N> {
     type Output = u8;
     #[track_caller]
+    #[hax_lib::requires(self.invariant() && item < self.len)]
+    #[hax_lib::ensures(|_| true)]
     fn index(&self, item: usize) -> &Self::Output {
         &self.as_slice()[item]
     }
 }
 
 #[allow(deprecated)]
+#[hax_lib::attributes]
 impl<const N: usize> TryFrom<&[u8]> for LakeBuffer<N> {
     type Error = ();
 
+    #[hax_lib::ensures(|res| match res {
+        Ok(buf) => buf.invariant(),
+        Err(_) => true,
+    })]
     fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
         let mut buffer = [0u8; N];
         if input.len() <= buffer.len() {

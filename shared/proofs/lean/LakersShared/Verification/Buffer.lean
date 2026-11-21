@@ -171,7 +171,7 @@ theorem buffer.LakeBuffer.as_slice.spec.proof {N : Std.Usize}
   (self : buffer.LakeBuffer N) : buffer.LakeBuffer.as_slice.spec self
   := by
   unfold buffer.LakeBuffer.as_slice.spec buffer.LakeBuffer.as_slice
-  hax_mvcgen [buffer.LakeBuffer.invariant,
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.len,
     core.Array.Insts.CoreOpsIndexIndex.index, core.Slice.Insts.CoreOpsIndexIndex.index,
     core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get]
   all_goals grind
@@ -211,7 +211,8 @@ theorem buffer.LakeBuffer.contains.spec.proof {N : Std.Usize}
   buffer.LakeBuffer.contains.spec self item
   := by
   unfold buffer.LakeBuffer.contains.spec buffer.LakeBuffer.contains
-  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.contains]
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.contains, core.slice.Slice.len,
+    core.U8.Insts.CoreCmpPartialEqU8]
   all_goals grind
 
 theorem buffer.LakeBuffer.push.spec.proof {N : Std.Usize}
@@ -258,5 +259,29 @@ theorem buffer.LakeBuffer.extend_reserve.spec.proof {N : Std.Usize}
   unfold buffer.LakeBuffer.extend_reserve.spec buffer.LakeBuffer.extend_reserve
   hax_mvcgen [buffer.LakeBuffer.invariant]
   all_goals grind
+
+theorem
+  buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec.proof {N :
+                                                                   Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.Usize) :
+  buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec self item
+  := by
+  unfold buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index
+  hax_mvcgen [buffer.LakeBuffer.invariant, buffer.LakeBuffer.as_slice,
+    core.Array.Insts.CoreOpsIndexIndex.index, core.Slice.Insts.CoreOpsIndexIndex.index,
+    core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get]
+  all_goals grind
+
+theorem
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec.proof
+   (N : Std.Usize) (input : Slice Std.U8) :
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec N
+  input
+  := by
+  unfold buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.len, core.Array.Insts.CoreOpsIndexIndexMut.index_mut,
+    core.array.Array.as_mut_slice, core.Slice.Insts.CoreOpsIndexIndexMut.index_mut,
+    core.ops.range.RangeToUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked_mut]
+  all_goals grind [Array.to_slice_mut, Array.to_slice]
 
 end lakers_shared

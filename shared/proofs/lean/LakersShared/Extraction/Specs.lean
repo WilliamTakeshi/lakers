@@ -270,13 +270,14 @@ def buffer.LakeBuffer.as_slice.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::as_slice::post]:
-    Source: 'shared/src/buffer.rs', lines 163:4-163:33 -/
+    Source: 'shared/src/buffer.rs', lines 163:4-163:48 -/
 @[reducible]
 def buffer.LakeBuffer.as_slice.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (s : Slice Std.U8) :
   RustM Bool
   := do
-  ok true
+  let i ← core.slice.Slice.len s
+  ok (i = self_.len)
 
 def buffer.LakeBuffer.as_slice.spec {N : Std.Usize}
   (self : buffer.LakeBuffer N) : Prop :=
@@ -374,5 +375,60 @@ def buffer.LakeBuffer.extend_reserve.spec {N : Std.Usize}
   buffer.LakeBuffer.extend_reserve self length
   ⦃ ⇓ res =>
   ⌜ (buffer.LakeBuffer.extend_reserve.post self length res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}::index::pre]:
+    Source: 'shared/src/buffer.rs', lines 231:4-231:61 -/
+@[reducible]
+def buffer.IndexLakeBufferUsizeU8.index.pre
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.Usize) :
+  RustM Bool
+  := do
+  let b ← buffer.LakeBuffer.invariant self_
+  if b
+  then ok (item < self_.len)
+  else ok false
+
+/-- [lakers_shared::buffer::{impl core::ops::index::Index<usize, u8> for lakers_shared::buffer::LakeBuffer<N>}::index::post]:
+    Source: 'shared/src/buffer.rs', lines 232:4-232:33 -/
+@[reducible]
+def buffer.IndexLakeBufferUsizeU8.index.post
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.Usize) (i : Std.U8)
+  :
+  RustM Bool
+  := do
+  ok true
+
+def buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.Usize) : Prop :=
+  (buffer.IndexLakeBufferUsizeU8.index.pre self item).holds →
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index self item
+  ⦃ ⇓ res =>
+  ⌜ (buffer.IndexLakeBufferUsizeU8.index.post self item res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{impl core::convert::TryFrom<&'_0 [u8], ()> for lakers_shared::buffer::LakeBuffer<N>}::try_from::post]:
+    Source: 'shared/src/buffer.rs', lines 243:4-246:7 -/
+@[reducible]
+def buffer.TryFromLakeBufferShared0SliceU8Tuple.try_from.post
+  {N : Std.Usize} (input : Slice Std.U8)
+  (res : core.result.Result (buffer.LakeBuffer N) Unit) :
+  RustM Bool
+  := do
+  match res with
+  | core.result.Result.Ok buf => buffer.LakeBuffer.invariant buf
+  | core.result.Result.Err _ => ok true
+
+def
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec
+   (N : Std.Usize) (input : Slice Std.U8) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from N
+  input
+  ⦃ ⇓ res =>
+  ⌜
+  (buffer.TryFromLakeBufferShared0SliceU8Tuple.try_from.post input res).holds
+  ⌝ ⦄
 
 end lakers_shared

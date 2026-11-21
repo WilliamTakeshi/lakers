@@ -113,4 +113,20 @@ theorem buffer.LakeBuffer.extend_reserve.spec.proof {N : Std.Usize}
   buffer.LakeBuffer.extend_reserve.spec self length
   := by sorry
 
+@[spec]
+theorem
+  buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec.proof {N :
+                                                                   Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.Usize) :
+  buffer.LakeBuffer.Insts.CoreOpsIndexIndexUsizeU8.index.spec self item
+  := by sorry
+
+@[spec]
+theorem
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec.proof
+   (N : Std.Usize) (input : Slice Std.U8) :
+  buffer.LakeBuffer.Insts.CoreConvertTryFromShared0SliceU8Tuple.try_from.spec N
+  input
+  := by sorry
+
 end lakers_shared
