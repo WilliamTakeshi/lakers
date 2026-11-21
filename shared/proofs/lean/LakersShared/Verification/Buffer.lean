@@ -186,6 +186,26 @@ theorem buffer.LakeBuffer.as_slice.triple {N : Std.Usize}
   hax_mvcgen [buffer.LakeBuffer.invariant]
   grind
 
+theorem buffer.LakeBuffer.new_from_slice.spec.proof (N : Std.Usize)
+  (slice : Slice Std.U8) : buffer.LakeBuffer.new_from_slice.spec N slice
+  := by
+  unfold buffer.LakeBuffer.new_from_slice.spec buffer.LakeBuffer.new_from_slice
+  hax_mvcgen [buffer.LakeBuffer.fill_with_slice, core.slice.Slice.len,
+    buffer.LakeBuffer.new, core.array.Array.as_mut_slice, buffer.copy_into_longer,
+    core.result.Result.is_ok, buffer.LakeBuffer.invariant]
+  all_goals grind
+
+theorem
+  buffer.LakeBuffer.new_from_array.spec.proof (N : Std.Usize) {AN : Std.Usize}
+  (input : Array Std.U8 AN) : buffer.LakeBuffer.new_from_array.spec N input
+  := by
+  unfold LakeBuffer.new_from_array.spec LakeBuffer.new_from_array
+  hax_mvcgen [buffer.LakeBuffer.new_from_slice, buffer.LakeBuffer.new,
+    core.slice.Slice.len, buffer.LakeBuffer.fill_with_slice,
+    core.array.Array.as_mut_slice, buffer.copy_into_longer, core.result.Result.is_ok,
+    buffer.LakeBuffer.invariant]
+  all_goals grind
+
 theorem buffer.LakeBuffer.contains.spec.proof {N : Std.Usize}
   (self : buffer.LakeBuffer N) (item : Std.U8) :
   buffer.LakeBuffer.contains.spec self item
@@ -230,5 +250,13 @@ theorem buffer.LakeBuffer.extend_from_slice.spec.proof {N : Std.Usize}
     core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked_mut,
     core.array.Array.as_mut_slice]
   all_goals grind [Array.to_slice_mut]
+
+theorem buffer.LakeBuffer.extend_reserve.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (length : Std.Usize) :
+  buffer.LakeBuffer.extend_reserve.spec self length
+  := by
+  unfold buffer.LakeBuffer.extend_reserve.spec buffer.LakeBuffer.extend_reserve
+  hax_mvcgen [buffer.LakeBuffer.invariant]
+  all_goals grind
 
 end lakers_shared

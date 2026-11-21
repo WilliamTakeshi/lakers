@@ -131,8 +131,54 @@ def buffer.LakeBuffer.capacity.spec {N : Std.Usize}
   ⦃ ⇓ res => ⌜ (buffer.LakeBuffer.capacity.post self res).holds ⌝ ⦄
 
 
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_slice::post]:
+    Source: 'shared/src/buffer.rs', lines 83:4-86:7 -/
+@[reducible]
+def buffer.LakeBuffer.new_from_slice.post
+  {N : Std.Usize} (slice : Slice Std.U8)
+  (res : core.result.Result (buffer.LakeBuffer N) buffer.LakeBufferError) :
+  RustM Bool
+  := do
+  match res with
+  | core.result.Result.Ok buf => buffer.LakeBuffer.invariant buf
+  | core.result.Result.Err _ => ok true
+
+def buffer.LakeBuffer.new_from_slice.spec (N : Std.Usize)
+  (slice : Slice Std.U8) : Prop :=
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.new_from_slice N slice
+  ⦃ ⇓ res =>
+  ⌜ (buffer.LakeBuffer.new_from_slice.post slice res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_array::pre]:
+    Source: 'shared/src/buffer.rs', lines 114:4-114:33 -/
+@[reducible]
+def buffer.LakeBuffer.new_from_array.pre
+  (N : Std.Usize) {AN : Std.Usize} (input : Array Std.U8 AN) : RustM Bool := do
+  ok (AN <= N)
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::new_from_array::post]:
+    Source: 'shared/src/buffer.rs', lines 115:4-115:46 -/
+@[reducible]
+def buffer.LakeBuffer.new_from_array.post
+  {N : Std.Usize} {AN : Std.Usize} (input : Array Std.U8 AN)
+  (buf : buffer.LakeBuffer N) :
+  RustM Bool
+  := do
+  buffer.LakeBuffer.invariant buf
+
+def buffer.LakeBuffer.new_from_array.spec (N : Std.Usize) {AN : Std.Usize}
+  (input : Array Std.U8 AN) : Prop :=
+  (buffer.LakeBuffer.new_from_array.pre N input).holds →
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.new_from_array N input
+  ⦃ ⇓ res =>
+  ⌜ (buffer.LakeBuffer.new_from_array.post input res).holds ⌝ ⦄
+
+
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::contains::pre]:
-    Source: 'shared/src/buffer.rs', lines 122:4-122:42 -/
+    Source: 'shared/src/buffer.rs', lines 128:4-128:42 -/
 @[reducible]
 def buffer.LakeBuffer.contains.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.U8) :
@@ -141,7 +187,7 @@ def buffer.LakeBuffer.contains.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::contains::post]:
-    Source: 'shared/src/buffer.rs', lines 123:4-123:33 -/
+    Source: 'shared/src/buffer.rs', lines 129:4-129:33 -/
 @[reducible]
 def buffer.LakeBuffer.contains.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.U8) (b : Bool) :
@@ -159,7 +205,7 @@ def buffer.LakeBuffer.contains.spec {N : Std.Usize}
 
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::push::pre]:
-    Source: 'shared/src/buffer.rs', lines 129:4-129:42 -/
+    Source: 'shared/src/buffer.rs', lines 135:4-135:42 -/
 @[reducible]
 def buffer.LakeBuffer.push.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.U8) :
@@ -168,7 +214,7 @@ def buffer.LakeBuffer.push.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::push::post]:
-    Source: 'shared/src/buffer.rs', lines 130:4-130:53 -/
+    Source: 'shared/src/buffer.rs', lines 136:4-136:53 -/
 @[reducible]
 def buffer.LakeBuffer.push.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (item : Std.U8)
@@ -188,7 +234,7 @@ def buffer.LakeBuffer.push.spec {N : Std.Usize} (self : buffer.LakeBuffer N)
 
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::get_slice::pre]:
-    Source: 'shared/src/buffer.rs', lines 141:4-141:42 -/
+    Source: 'shared/src/buffer.rs', lines 147:4-147:42 -/
 @[reducible]
 def buffer.LakeBuffer.get_slice.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (start : Std.Usize)
@@ -198,7 +244,7 @@ def buffer.LakeBuffer.get_slice.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::get_slice::post]:
-    Source: 'shared/src/buffer.rs', lines 142:4-142:33 -/
+    Source: 'shared/src/buffer.rs', lines 148:4-148:33 -/
 @[reducible]
 def buffer.LakeBuffer.get_slice.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (start : Std.Usize)
@@ -217,14 +263,14 @@ def buffer.LakeBuffer.get_slice.spec {N : Std.Usize}
 
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::as_slice::pre]:
-    Source: 'shared/src/buffer.rs', lines 156:4-156:42 -/
+    Source: 'shared/src/buffer.rs', lines 162:4-162:42 -/
 @[reducible]
 def buffer.LakeBuffer.as_slice.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) : RustM Bool := do
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::as_slice::post]:
-    Source: 'shared/src/buffer.rs', lines 157:4-157:33 -/
+    Source: 'shared/src/buffer.rs', lines 163:4-163:33 -/
 @[reducible]
 def buffer.LakeBuffer.as_slice.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (s : Slice Std.U8) :
@@ -241,7 +287,7 @@ def buffer.LakeBuffer.as_slice.spec {N : Std.Usize}
 
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::fill_with_slice::pre]:
-    Source: 'shared/src/buffer.rs', lines 162:4-162:42 -/
+    Source: 'shared/src/buffer.rs', lines 168:4-168:42 -/
 @[reducible]
 def buffer.LakeBuffer.fill_with_slice.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -250,7 +296,7 @@ def buffer.LakeBuffer.fill_with_slice.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::fill_with_slice::post]:
-    Source: 'shared/src/buffer.rs', lines 163:4-163:53 -/
+    Source: 'shared/src/buffer.rs', lines 169:4-169:53 -/
 @[reducible]
 def buffer.LakeBuffer.fill_with_slice.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (slice : Slice Std.U8)
@@ -271,7 +317,7 @@ def buffer.LakeBuffer.fill_with_slice.spec {N : Std.Usize}
 
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_from_slice::pre]:
-    Source: 'shared/src/buffer.rs', lines 175:4-175:42 -/
+    Source: 'shared/src/buffer.rs', lines 181:4-181:42 -/
 @[reducible]
 def buffer.LakeBuffer.extend_from_slice.pre
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (slice : Slice Std.U8) :
@@ -280,7 +326,7 @@ def buffer.LakeBuffer.extend_from_slice.pre
   buffer.LakeBuffer.invariant self_
 
 /-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_from_slice::post]:
-    Source: 'shared/src/buffer.rs', lines 176:4-176:53 -/
+    Source: 'shared/src/buffer.rs', lines 182:4-182:53 -/
 @[reducible]
 def buffer.LakeBuffer.extend_from_slice.post
   {N : Std.Usize} (self_ : buffer.LakeBuffer N) (slice : Slice Std.U8)
@@ -298,5 +344,35 @@ def buffer.LakeBuffer.extend_from_slice.spec {N : Std.Usize}
   buffer.LakeBuffer.extend_from_slice self slice
   ⦃ ⇓ res =>
   ⌜ (buffer.LakeBuffer.extend_from_slice.post self slice res).holds ⌝ ⦄
+
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_reserve::pre]:
+    Source: 'shared/src/buffer.rs', lines 206:4-206:42 -/
+@[reducible]
+def buffer.LakeBuffer.extend_reserve.pre
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (length : Std.Usize) :
+  RustM Bool
+  := do
+  buffer.LakeBuffer.invariant self_
+
+/-- [lakers_shared::buffer::{lakers_shared::buffer::LakeBuffer<N>}::extend_reserve::post]:
+    Source: 'shared/src/buffer.rs', lines 207:4-207:53 -/
+@[reducible]
+def buffer.LakeBuffer.extend_reserve.post
+  {N : Std.Usize} (self_ : buffer.LakeBuffer N) (length : Std.Usize)
+  (p : ((core.result.Result (core.ops.range.Range Std.Usize)
+  buffer.LakeBufferError) × (buffer.LakeBuffer N))) :
+  RustM Bool
+  := do
+  let (_, self__future) := p
+  buffer.LakeBuffer.invariant self__future
+
+def buffer.LakeBuffer.extend_reserve.spec {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (length : Std.Usize) : Prop :=
+  (buffer.LakeBuffer.extend_reserve.pre self length).holds →
+  ⦃ ⌜ True ⌝ ⦄
+  buffer.LakeBuffer.extend_reserve self length
+  ⦃ ⇓ res =>
+  ⌜ (buffer.LakeBuffer.extend_reserve.post self length res).holds ⌝ ⦄
 
 end lakers_shared

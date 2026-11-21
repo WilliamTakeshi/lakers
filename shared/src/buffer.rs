@@ -80,6 +80,10 @@ impl<const N: usize> LakeBuffer<N> {
         N
     }
 
+    #[hax_lib::ensures(|res| match res {
+        Ok(buf) => buf.invariant(),
+        Err(_) => true,
+    })]
     pub const fn new_from_slice(slice: &[u8]) -> Result<Self, LakeBufferError> {
         let mut buffer = Self::new();
         if buffer.fill_with_slice(slice).is_ok() {
@@ -107,6 +111,8 @@ impl<const N: usize> LakeBuffer<N> {
     /// # use lakers_shared::*;
     /// const MY_CONST: LakeMessageBuffer = LakeMessageBuffer::new_from_array(&[0; 10_000]);
     /// ```
+    #[hax_lib::requires(AN <= N)]
+    #[hax_lib::ensures(|buf| buf.invariant())]
     pub const fn new_from_array<const AN: usize>(input: &[u8; AN]) -> Self {
         const {
             if AN > N {
@@ -197,6 +203,8 @@ impl<const N: usize> LakeBuffer<N> {
     ///
     /// This is not a fully idiomatic Rust API: Preferably, this would return a `&mut [u8]` of the
     /// requested length.,
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| future(self).invariant())]
     pub fn extend_reserve(
         &mut self,
         length: usize,
