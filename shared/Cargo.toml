@@ -11,6 +11,11 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[package.metadata.charon]
+exclude = [
+  "{impl core::fmt::*}",
+]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(hax)'] }
 
