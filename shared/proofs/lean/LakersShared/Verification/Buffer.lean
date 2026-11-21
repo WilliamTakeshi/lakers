@@ -113,6 +113,20 @@ theorem u8_array_repeat_spec (N : Std.Usize) (x : Std.U8) :
   simp only [hg, bind_ok, List.length_replicate, ↓reduceDIte]
   hax_mvcgen
   simp [Array.from_val]
+
+
+-- copy_from_slice on u8 never panics when the lengths match and returns src: clone is the identity on u8 (u8_clone_mapM), so the clone-failure and divergence branches of the match are impossible.
+@[spec]
+theorem u8_copy_from_slice_spec (s src : Slice Std.U8) (h : s.val.length = src.val.length) :
+    ⦃ ⌜ True ⌝ ⦄
+    core.slice.Slice.copy_from_slice core.U8.Insts.CoreMarkerCopy s src
+    ⦃ ⇓ r => ⌜ r = src ⌝ ⦄ := by
+  unfold core.slice.Slice.copy_from_slice rust_primitives.slice.slice_clone_from_slice
+  simp only [core.U8.Insts.CoreMarkerCopy, h]
+  hax_mvcgen
+  all_goals rename_i hm
+  all_goals rw [u8_clone_mapM, RustM.match.ok] at hm
+  all_goals simp_all [Slice.eq_iff, Slice.from_val]
 -- SPECS TO HELP PROVE END
 
 theorem buffer.copy_into_longer.spec.proof (long : Slice Std.U8)
@@ -180,6 +194,14 @@ theorem buffer.LakeBuffer.contains.spec.proof {N : Std.Usize}
   hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.contains]
   all_goals grind
 
+theorem buffer.LakeBuffer.push.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (item : Std.U8) :
+  buffer.LakeBuffer.push.spec self item
+  := by
+  unfold buffer.LakeBuffer.push.spec buffer.LakeBuffer.push
+  hax_mvcgen [core.slice.Slice.len, buffer.LakeBuffer.invariant]
+  all_goals grind
+
 theorem buffer.LakeBuffer.get_slice.spec.proof {N : Std.Usize}
   (self : buffer.LakeBuffer N) (start : Std.Usize) (len : Std.Usize) :
   buffer.LakeBuffer.get_slice.spec self start len
@@ -189,5 +211,24 @@ theorem buffer.LakeBuffer.get_slice.spec.proof {N : Std.Usize}
     core.Array.Insts.CoreOpsIndexIndex.index, core.Slice.Insts.CoreOpsIndexIndex.index,
     core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get]
   all_goals grind
+
+theorem buffer.LakeBuffer.fill_with_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
+  buffer.LakeBuffer.fill_with_slice.spec self slice
+  := by
+  unfold buffer.LakeBuffer.fill_with_slice.spec buffer.LakeBuffer.fill_with_slice
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.len, core.array.Array.as_mut_slice, buffer.copy_into_longer]
+  all_goals grind
+
+theorem buffer.LakeBuffer.extend_from_slice.spec.proof {N : Std.Usize}
+  (self : buffer.LakeBuffer N) (slice : Slice Std.U8) :
+  buffer.LakeBuffer.extend_from_slice.spec self slice
+  := by
+  unfold buffer.LakeBuffer.extend_from_slice.spec buffer.LakeBuffer.extend_from_slice
+  hax_mvcgen [buffer.LakeBuffer.invariant, core.slice.Slice.len, buffer.LakeBuffer.impl.len,
+    core.Array.Insts.CoreOpsIndexIndexMut.index_mut, core.Slice.Insts.CoreOpsIndexIndexMut.index_mut,
+    core.ops.range.RangeUsize.Insts.CoreSliceIndexSliceIndexSliceSlice.get_unchecked_mut,
+    core.array.Array.as_mut_slice]
+  all_goals grind [Array.to_slice_mut]
 
 end lakers_shared

@@ -126,6 +126,8 @@ impl<const N: usize> LakeBuffer<N> {
     }
 
     #[inline]
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| future(self).invariant())]
     pub fn push(&mut self, item: u8) -> Result<(), LakeBufferError> {
         if self.len < self.content.len() {
             self.content[self.len] = item;
@@ -157,6 +159,8 @@ impl<const N: usize> LakeBuffer<N> {
         &self.content[0..self.len]
     }
 
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| future(self).invariant())]
     pub const fn fill_with_slice(&mut self, slice: &[u8]) -> Result<(), LakeBufferError> {
         if slice.len() <= self.content.len() {
             copy_into_longer(&mut self.content, slice);
@@ -168,6 +172,8 @@ impl<const N: usize> LakeBuffer<N> {
     }
 
     #[inline]
+    #[hax_lib::requires(self.invariant())]
+    #[hax_lib::ensures(|_| future(self).invariant())]
     pub fn extend_from_slice(&mut self, slice: &[u8]) -> Result<(), LakeBufferError> {
         if self.len >= usize::MAX / 2 || slice.len() >= usize::MAX / 2 {
             return Err(LakeBufferError::SliceTooLong);
