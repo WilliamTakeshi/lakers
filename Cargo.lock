@@ -1853,15 +1853,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lakers-crypto-cryptocell310"
-version = "0.9.0"
-dependencies = [
- "bindgen",
- "digest 0.10.7",
- "lakers-shared",
-]
-
-[[package]]
 name = "lakers-crypto-embedded-cal"
 version = "0.9.0"
 dependencies = [
