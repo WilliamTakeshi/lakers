@@ -8,26 +8,50 @@
 /// Convenience re-export
 pub use lakers_shared::Crypto as CryptoTrait;
 
+#[cfg(feature = "_cryptocell")]
+mod hardware;
+
 cfg_if::cfg_if!(
-    if #[cfg(feature = "psa")] {
-        pub type Crypto = lakers_crypto_psa::Crypto;
+    if #[cfg(feature = "rustcrypto")] {
+        pub type Crypto = lakers_crypto_embedded_cal::Crypto<
+            embedded_cal_rustcrypto::RustcryptoCalExtender<
+                embedded_cal_rand::WithRng<embedded_cal::empty::EmptyCal, rand_core::UnwrapErr<getrandom::SysRng>>,
+            >,
+        >;
         pub const fn default_crypto() -> Crypto {
-            lakers_crypto_psa::Crypto
+            lakers_crypto_embedded_cal::Crypto::new(
+                embedded_cal_rustcrypto::RustcryptoCalExtender::new_extending(
+                    embedded_cal_rand::WithRng {
+                        cal: embedded_cal::empty::EmptyCal,
+                        rng: rand_core::UnwrapErr(getrandom::SysRng),
+                    },
+                ),
+            )
         }
-    } else if #[cfg(feature = "rustcrypto")] {
-        pub type Crypto = lakers_crypto_rustcrypto::Crypto<rand_core::OsRng>;
-        pub const fn default_crypto() -> Crypto {
-            lakers_crypto_rustcrypto::Crypto::new(rand_core::OsRng)
+    } else if #[cfg(feature = "_cryptocell")] {
+        pub struct CryptoCellExtConfig;
+        impl embedded_cal_software_demo::ExtenderConfig for CryptoCellExtConfig {
+            const IMPLEMENT_SHA2SHORT: bool = true;
+            const IMPLEMENT_SHA2SHORT_PLUMBING: bool = false;
+            type Base = embedded_cal_cryptocell::CryptoCellCal;
         }
-    } else if #[cfg(feature = "cryptocell310")] {
-        pub type Crypto = lakers_crypto_cryptocell310::Crypto;
-        pub const fn default_crypto() -> Crypto {
-            lakers_crypto_cryptocell310::Crypto
+        pub type Crypto = lakers_crypto_embedded_cal::Crypto<
+            hardware::KeepPowered<embedded_cal_software_demo::Extender<CryptoCellExtConfig>>,
+        >;
+        pub fn default_crypto() -> Crypto {
+            lakers_crypto_embedded_cal::Crypto::new(hardware::KeepPowered::new(
+                embedded_cal_software_demo::Extender::new(
+                    embedded_cal_cryptocell::CryptoCellCal::new(
+                        embedded_cal_cryptocell::Peripherals::all(),
+                    ),
+                ),
+            ))
         }
     } else if #[cfg(feature = "nrf54l15")] {
         pub struct Nrf54l15ExtConfig;
         impl embedded_cal_software_demo::ExtenderConfig for Nrf54l15ExtConfig {
             const IMPLEMENT_SHA2SHORT: bool = true;
+            const IMPLEMENT_SHA2SHORT_PLUMBING: bool = false;
             type Base = embedded_cal_nrf54l15::Nrf54l15Cal;
         }
         pub type Crypto = lakers_crypto_embedded_cal::Crypto<
@@ -37,6 +61,7 @@ cfg_if::cfg_if!(
         pub struct Stm32wba55ExtConfig;
         impl embedded_cal_software_demo::ExtenderConfig for Stm32wba55ExtConfig {
             const IMPLEMENT_SHA2SHORT: bool = true;
+            const IMPLEMENT_SHA2SHORT_PLUMBING: bool = false;
             type Base = embedded_cal_stm32wba55::Stm32wba55Cal;
         }
         pub type Crypto = lakers_crypto_embedded_cal::Crypto<
@@ -44,7 +69,7 @@ cfg_if::cfg_if!(
         >;
     }
     else {
-        compile_error!("One of the features `psa`, `rustcrypto`, `cryptocell310`, `nrf54l15` or `stm32wba55` must be enabled.");
+        compile_error!("One of the features `rustcrypto`, `cryptocell310`, `nrf5340`, `nrf54l15` or `stm32wba55` must be enabled.");
     }
 );
 
@@ -52,8 +77,8 @@ cfg_if::cfg_if!(
 #[allow(dead_code)]
 fn test_helper<T: CryptoTrait>() {}
 
-/// Ensure at build time that whichever type as selected for Crypto actually implements the Crypto
-/// trait, and that one is actually defined.
+/// Ensure at build time that whichever type as selected for Crypto actually is usable with lakers,
+/// and that one is actually defined.
 #[allow(dead_code)]
 fn test_implements_crypto() {
     test_helper::<Crypto>()
@@ -62,6 +87,7 @@ fn test_implements_crypto() {
 #[cfg(test)]
 mod tests {
     use hexlit::hex;
+    use lakers_shared::crypto::hkdf_expand;
     use lakers_shared::{MAX_INFO_LEN, SHA256_DIGEST_LEN};
     use rstest::rstest;
 
@@ -96,7 +122,7 @@ mod tests {
 
         let mut output = Vec::new();
         output.resize(output_length, 0x00);
-        crypto.hkdf_expand(&prk, &info[..info_slice.len()], &mut output);
+        hkdf_expand(&mut crypto, &prk, &info[..info_slice.len()], &mut output);
         assert_eq!(output, expected_okm_slice[..]);
     }
 }

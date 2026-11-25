@@ -11,8 +11,6 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
 
-# Runners are pinned to ubuntu-24.04 because rust-psa-crypto's bindgen 0.69 generates broken
-# bindings with the newer libclang on ubuntu-26.04; go back to ubuntu-latest once rust-psa-crypto is removed.
 jobs:
   check-style:
     runs-on: ubuntu-24.04
@@ -22,7 +20,7 @@ jobs:
     - name: Install Rust formatter
       run: rustup component add rustfmt
     - name: Run cargo check
-      run: cargo check --all-features
+      run: cargo check -p lakers -p coap@0.1.0 --all-features
     - name: Check if code is well formatted
       run: cargo fmt --check
 
@@ -48,7 +46,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crypto_backend: [lakers-crypto/psa, lakers-crypto/rustcrypto]
         ead: [ead-none, ead-authz]
         buffers: [default-buffers, large-buffers]
 
@@ -57,7 +54,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Run unit tests with feature matrix # note that we only add `--package lakers-ead-authz` when testing with that config
-      run: RUST_BACKTRACE=1 cargo test -p lakers -p lakers-crypto -p lakers-shared ${{ matrix.ead == 'ead-authz' && '-p lakers-ead-authz' || '' }}  --no-default-features --features="${{ matrix.crypto_backend }}, test-${{ matrix.ead }}${{ matrix.buffers == 'large-buffers' && ', lakers-shared/large_buffers' || '' }}" --no-fail-fast -- --test-threads 1
+      run: RUST_BACKTRACE=1 cargo test -p lakers -p lakers-crypto -p lakers-shared ${{ matrix.ead == 'ead-authz' && '-p lakers-ead-authz' || '' }}  --no-default-features --features="lakers-crypto/rustcrypto, test-${{ matrix.ead }}${{ matrix.buffers == 'large-buffers' && ', lakers-shared/large_buffers' || '' }}" --no-fail-fast -- --test-threads 1
 
 
   build-lake-package:
@@ -67,19 +64,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crypto_backend: [lakers-crypto/psa, lakers-crypto/psa-baremetal, lakers-crypto/cryptocell310, lakers-crypto/rustcrypto]
+        include:
+          - crypto: lakers-crypto/cryptocell310
+            target: thumbv7em-none-eabihf
+          - crypto: lakers-crypto/rustcrypto
+            target: x86_64-unknown-linux-gnu
 
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Install arm targets for Rust
-      run: rustup target add thumbv7m-none-eabi && rustup target add thumbv7em-none-eabihf
-    - name: Install arm gcc
-      run: sudo apt-get -y update && sudo apt-get -y install gcc-arm-none-eabi
+    - name: Install the target for Rust
+      run: rustup target add "${{ matrix.target }}"
 
     - name: Build
-      run: cargo build --package lakers --package lakers-crypto --package lakers-ead-authz --no-default-features --features="${{ matrix.crypto_backend }}" --release
+      run: cargo build --package lakers --package lakers-crypto --package lakers-ead-authz --no-default-features --features="${{ matrix.crypto }}" --target="${{ matrix.target }}" --release
 
 
   generate-fstar:
@@ -135,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crypto_backend: [crypto-rustcrypto, crypto-psa-baremetal, crypto-cryptocell310]
+        crypto: [crypto-rustcrypto, crypto-cryptocell310]
 
     steps:
     - name: Checkout repo
@@ -143,16 +142,16 @@ jobs:
 
     - name: Install arm targets for Rust
       run: rustup target add thumbv7em-none-eabihf
-    - name: Install arm gcc and cbindgen
-      run: sudo apt-get -y update && sudo apt-get -y install gcc-arm-none-eabi cbindgen
+    - name: Install cbindgen
+      run: sudo apt-get -y update && sudo apt-get -y install cbindgen
 
     - name: Build static library, generate headers, and zip to file
-      run: cd lakers-c && ./build.sh "${{ matrix.crypto_backend }}"
+      run: cd lakers-c && ./build.sh "${{ matrix.crypto }}"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: lakers-c-${{ matrix.crypto_backend }}
+        name: lakers-c-${{ matrix.crypto }}
         path: ./target/lakers-c-*.zip
 
 
@@ -181,8 +180,8 @@ jobs:
 
     - name: Install arm targets for Rust
       run: rustup target add thumbv7em-none-eabihf
-    - name: Install arm gcc and cbindgen
-      run: sudo apt-get -y update && sudo apt-get -y install gcc-arm-none-eabi cbindgen
+    - name: Install cbindgen
+      run: sudo apt-get -y update && sudo apt-get -y install cbindgen
 
     - name: Build static library and generate headers
       run: cd lakers-c && ./build.sh crypto-rustcrypto
@@ -226,8 +225,6 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        crypto_backend: [crypto-psa]
 
     steps:
     - name: Checkout repo
@@ -235,13 +232,11 @@ jobs:
 
     - name: Install arm targets for Rust
       run: rustup target add thumbv7m-none-eabi
-    - name: Install arm gcc
-      run: sudo apt-get -y update && sudo apt-get -y install gcc-arm-none-eabi
     - name: Install QEMU ARM emulator
-      run: sudo apt-get -y install qemu-system-arm
+      run: sudo apt-get -y update && sudo apt-get -y install qemu-system-arm
 
     - name: Run tests in QEMU
-      run: cd examples/lakers-no_std && cargo run --target="thumbv7m-none-eabi" --no-default-features --features="${{ matrix.crypto_backend }}" --release
+      run: cd examples/lakers-no_std && cargo run --target="thumbv7m-none-eabi" --no-default-features --features="crypto-insecure-test" --release
 
 
   build-example-for-cortex-m4:
@@ -251,7 +246,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crypto_backend: [crypto-psa, crypto-cryptocell310]
+        crypto: [crypto-insecure-test, crypto-cryptocell310]
 
     steps:
     - name: Checkout repo
@@ -259,11 +254,9 @@ jobs:
 
     - name: Install arm targets for Rust
       run: rustup target add thumbv7em-none-eabihf
-    - name: Install arm gcc
-      run: sudo apt-get -y update && sudo apt-get -y install gcc-arm-none-eabi
 
     - name: Build example
-      run: cd examples/lakers-no_std && cargo build --target="thumbv7em-none-eabihf" --no-default-features --features="${{ matrix.crypto_backend }}, rtt" --release
+      run: cd examples/lakers-no_std && cargo build --target="thumbv7em-none-eabihf" --no-default-features --features="${{ matrix.crypto }}, rtt" --release
 
 
   build-coap-example:

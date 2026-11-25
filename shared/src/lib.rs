@@ -18,8 +18,10 @@ pub use lake_parser::*;
 use core::num::NonZeroI16;
 use defmt_or_log::trace;
 
-mod crypto;
-pub use crypto::*;
+pub mod crypto;
+pub use crypto::prepare_suites_i;
+#[cfg(not(hax))]
+pub use crypto::Crypto;
 
 mod cred;
 pub use cred::*;
