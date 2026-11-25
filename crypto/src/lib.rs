@@ -12,12 +12,7 @@ pub use lakers_shared::Crypto as CryptoTrait;
 mod hardware;
 
 cfg_if::cfg_if!(
-    if #[cfg(feature = "psa")] {
-        pub type Crypto = lakers_crypto_psa::Crypto;
-        pub const fn default_crypto() -> Crypto {
-            lakers_crypto_psa::Crypto
-        }
-    } else if #[cfg(feature = "rustcrypto")] {
+    if #[cfg(feature = "rustcrypto")] {
         pub type Crypto = lakers_crypto_embedded_cal::Crypto<
             embedded_cal_rustcrypto::RustcryptoCalExtender<
                 embedded_cal_rand::WithRng<embedded_cal::empty::EmptyCal, rand_core::UnwrapErr<getrandom::SysRng>>,
@@ -74,7 +69,7 @@ cfg_if::cfg_if!(
         >;
     }
     else {
-        compile_error!("One of the features `psa`, `rustcrypto`, `cryptocell310`, `nrf5340`, `nrf54l15` or `stm32wba55` must be enabled.");
+        compile_error!("One of the features `rustcrypto`, `cryptocell310`, `nrf5340`, `nrf54l15` or `stm32wba55` must be enabled.");
     }
 );
 
