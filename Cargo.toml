@@ -56,6 +56,7 @@ lakers = { package = "lakers", path = "lib/", version = "^0.9.0", default-featur
 
 # FIXME: go back to lake-rs/embedded-cal when the cryptocell branch is merged (lake-rs/embedded-cal#157)
 embedded-cal = { git = "https://github.com/malishav/embedded-cal", branch = "cryptocell" }
+embedded-cal-cryptocell = { git = "https://github.com/malishav/embedded-cal", branch = "cryptocell" }
 embedded-cal-nrf54l15 = { git = "https://github.com/malishav/embedded-cal", branch = "cryptocell" }
 embedded-cal-rand = { git = "https://github.com/malishav/embedded-cal", branch = "cryptocell" }
 embedded-cal-rustcrypto = { git = "https://github.com/malishav/embedded-cal", branch = "cryptocell" }
