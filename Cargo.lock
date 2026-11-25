@@ -1896,11 +1896,16 @@ dependencies = [
  "defmt 0.3.101",
  "defmt-rtt 0.4.2",
  "embedded-alloc",
+ "embedded-cal",
+ "embedded-cal-rand",
+ "embedded-cal-rustcrypto",
  "hexlit",
  "lakers",
  "lakers-crypto",
+ "lakers-crypto-embedded-cal",
  "lakers-ead-authz",
  "panic-semihosting",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
